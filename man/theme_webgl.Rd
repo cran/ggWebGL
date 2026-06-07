@@ -10,6 +10,7 @@ theme_webgl(
   transparent = TRUE,
   buffer_size = 65536L,
   interactions = c("pan", "zoom"),
+  interactions_spec = NULL,
   rendering = "visualization",
   panel_overlay = "auto",
   view = NULL,
@@ -18,14 +19,21 @@ theme_webgl(
   camera = "orbit",
   projection = "orthographic",
   camera_state = list(),
+  depth_test = NULL,
+  blend_mode = "auto",
   timeline = NULL,
+  transport = NULL,
   ...
 )
 }
 \arguments{
-\item{shader}{Shader preset name or path identifier. Built-in modes are
-\code{"default"}, \code{"density_splat"}, \code{"trajectory_age"}, and
-\code{"trajectory_age_glow"}.}
+\item{shader}{Shader preset name or path identifier. Built-in modes include
+point shaders (\code{"default"}, \code{"density_splat"}, \code{"uncertainty_alpha"},
+\code{"point_sprite_glow"}), trajectory shaders (\code{"trajectory_age"},
+\code{"trajectory_age_glow"}, \code{"trajectory_velocity"},
+\code{"trajectory_direction"}), and raster shaders (\code{"raster_texture"},
+\code{"raster_threshold"}, \code{"raster_contour_overlay"}). Mesh and surface layers
+usually select their shader through material/shading arguments.}
 
 \item{antialias}{Logical scalar; whether antialiasing should be requested.}
 
@@ -38,6 +46,10 @@ by the eventual renderer.}
 \item{interactions}{Legacy character vector of interaction modes to enable.
 New code should use \code{selection = ggwebgl_selection(...)} for brush/lasso
 behavior.}
+
+\item{interactions_spec}{Optional \code{\link[=ggwebgl_interactions]{ggwebgl_interactions()}} object. This is
+the preferred structured interaction contract for hover, click, brush,
+lasso, camera, and Shiny event behavior.}
 
 \item{rendering}{Rendering contract mode. \code{"visualization"} keeps the
 current interactive widget chrome. \code{"publication"} suppresses presentation
@@ -56,8 +68,18 @@ selection contract.}
 \item{dimension, camera, projection, camera_state}{Legacy view fields retained as
 an internal migration shim.}
 
+\item{depth_test}{Logical scalar. \code{NULL} uses the renderer default: disabled
+for 2D scenes and enabled for 3D scenes. Set explicitly to override.}
+
+\item{blend_mode}{Primitive blending mode: \code{"auto"}, \code{"alpha"},
+\code{"additive"}, or \code{"premultiplied"}.}
+
 \item{timeline}{Optional \code{ggwebgl_timeline()} specification for runtime
 playback controls.}
+
+\item{transport}{Optional \code{ggwebgl_transport()} object controlling compact
+typed-array payloads, LOD previews, and progressive upload for large point
+layers.}
 
 \item{...}{Reserved for future backend-specific options.}
 }

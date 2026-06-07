@@ -37,7 +37,14 @@ articles:
     navbar: Articles
     contents:
       - getting-started
+      - ggplot-coverage
+      - ggplot-coverage-core
+      - ggplot-coverage-summaries
+      - ggplot-coverage-3d
       - renderer-capabilities
+      - temporal-trajectories
+      - surface-mesh-showcase
+      - interactive-benchmarks
       - renderer-showcase-examples
       - real-data-evidence
   - title: Optional downstream bridges
@@ -45,6 +52,9 @@ articles:
     contents:
       - xgeortr-bridge
       - boids4r-animation
+      - boids4r-scenarios-2d
+      - boids4r-scenarios-3d
+      - boids4r-custom-workflow
 
 footer:
   structure:

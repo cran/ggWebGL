@@ -57,11 +57,25 @@ default_theme_webgl <- function() {
       )
     ),
     selection = list(mode = "none", highlight = TRUE, emit = TRUE),
+    interactions_spec = NULL,
     dimension = "2d",
     camera = "orbit",
     projection = "orthographic",
     camera_state = list(),
+    depth_test = NULL,
+    blend_mode = "auto",
     timeline = NULL,
+    time_scale = NULL,
+    transport = list(
+      mode = "auto",
+      threshold = 100000L,
+      progressive = "auto",
+      chunk_size = 100000L,
+      position = "float32",
+      colors = "auto",
+      lod = "auto",
+      lod_max_points = 5000L
+    ),
     line_mode = "auto",
     line_join = "bevel",
     line_cap = "round",
@@ -77,12 +91,43 @@ normalise_shader_name <- function(shader) {
     density = "density_splat",
     splat = "density_splat",
     density_splat = "density_splat",
+    uncertainty = "uncertainty_alpha",
+    `uncertainty-alpha` = "uncertainty_alpha",
+    uncertainty_alpha = "uncertainty_alpha",
+    point_glow = "point_sprite_glow",
+    point_sprite = "point_sprite_glow",
+    point_sprite_glow = "point_sprite_glow",
+    `point-sprite-glow` = "point_sprite_glow",
     trajectory = "trajectory_age",
     age = "trajectory_age",
     trajectory_age = "trajectory_age",
     trajectory_age_glow = "trajectory_age_glow",
     `trajectory-glow` = "trajectory_age_glow",
     glow = "trajectory_age_glow",
+    trajectory_velocity = "trajectory_velocity",
+    `trajectory-velocity` = "trajectory_velocity",
+    velocity = "trajectory_velocity",
+    trajectory_direction = "trajectory_direction",
+    `trajectory-direction` = "trajectory_direction",
+    direction = "trajectory_direction",
+    raster = "raster_texture",
+    texture = "raster_texture",
+    raster_texture = "raster_texture",
+    threshold = "raster_threshold",
+    raster_threshold = "raster_threshold",
+    `raster-threshold` = "raster_threshold",
+    contour = "raster_contour_overlay",
+    raster_contour_overlay = "raster_contour_overlay",
+    `raster-contour` = "raster_contour_overlay",
+    surface_flat = "surface_flat",
+    surface_lambert = "surface_lambert",
+    surface_height_colormap = "surface_height_colormap",
+    surface_uncertainty_alpha = "surface_uncertainty_alpha",
+    mesh_flat = "mesh_flat",
+    mesh_lambert = "mesh_lambert",
+    mesh_phong_simple = "mesh_phong_simple",
+    mesh_scalar_colormap = "mesh_scalar_colormap",
+    mesh_selection_highlight = "mesh_selection_highlight",
     default = "default",
     shader
   )
@@ -183,6 +228,24 @@ normalise_projection <- function(projection) {
 
   if (!value %in% c("orthographic", "perspective")) {
     return(default_theme_webgl()[["projection"]])
+  }
+
+  value
+}
+
+normalise_depth_test <- function(depth_test = NULL, dimension = "2d") {
+  if (is.null(depth_test)) {
+    return(identical(normalise_dimension(dimension), "3d"))
+  }
+
+  isTRUE(depth_test)
+}
+
+normalise_blend_mode <- function(blend_mode) {
+  value <- tolower(as.character(blend_mode)[1] %||% default_theme_webgl()[["blend_mode"]])
+
+  if (!value %in% c("auto", "alpha", "additive", "premultiplied")) {
+    return(default_theme_webgl()[["blend_mode"]])
   }
 
   value
@@ -402,7 +465,11 @@ normalise_selection <- function(selection = NULL, interactions = NULL) {
 #'
 #' Build a renderer material specification for mesh and surface layers.
 #'
-#' @param shading Shading model, `"flat"` or `"lambert"`.
+#' @param shading Shading model. `"flat"` and `"lambert"` are the stable
+#'   material aliases; mesh shader aliases such as `"mesh_lambert"` and
+#'   `"mesh_scalar_colormap"` and surface shader aliases such as
+#'   `"surface_lambert"` and `"surface_height_colormap"` are accepted by their
+#'   respective layer families.
 #' @param ambient,diffuse,specular Lighting coefficients.
 #' @param light_dir Directional light vector.
 #' @param wireframe Whether to request a wireframe overlay.
@@ -413,7 +480,19 @@ normalise_selection <- function(selection = NULL, interactions = NULL) {
 #' @examples
 #' ggwebgl_material(shading = "lambert", wireframe = TRUE)
 #' @export
-ggwebgl_material <- function(shading = c("flat", "lambert"),
+ggwebgl_material <- function(shading = c(
+                               "flat",
+                               "lambert",
+                               "mesh_flat",
+                               "mesh_lambert",
+                               "mesh_phong_simple",
+                               "mesh_scalar_colormap",
+                               "mesh_selection_highlight",
+                               "surface_flat",
+                               "surface_lambert",
+                               "surface_height_colormap",
+                               "surface_uncertainty_alpha"
+                             ),
                              ambient = 0.35,
                              diffuse = 0.75,
                              specular = 0,
@@ -477,6 +556,12 @@ normalise_material <- function(material = NULL, wireframe = NULL) {
 #' @param filter Timeline visibility mode. `"exact"` shows only samples matching
 #'   the current frame or time. `"cumulative"` keeps samples up to the current
 #'   frame or time.
+#' @param values Optional frame or time values. Use `source` to choose whether
+#'   they populate the frame or time axis.
+#' @param source Timeline value source for `values`. `"auto"` uses frame values
+#'   unless `time` is supplied.
+#' @param mode Optional alias for `filter`.
+#' @param fps Optional frames-per-second metadata for downstream controls.
 #'
 #' @return A `ggwebgl_timeline` list.
 #'
@@ -490,17 +575,39 @@ ggwebgl_timeline <- function(frames = NULL,
                              autoplay = FALSE,
                              speed = 1,
                              controls = TRUE,
-                             filter = c("exact", "cumulative")) {
-  filter <- match.arg(filter)
+                             filter = c("exact", "cumulative"),
+                             values = NULL,
+                             source = c("auto", "frame", "time"),
+                             mode = NULL,
+                             fps = NULL) {
+  source <- match.arg(source)
+  filter <- normalise_timeline_filter(mode %||% filter)
+  speed <- normalise_timeline_speed(speed)
+  if (!is.null(values)) {
+    value_source <- normalise_timeline_value_source(source, values = values, frames = frames, time = time)
+    if (identical(value_source, "time") && is.null(time)) {
+      time <- values
+    } else if (is.null(frames)) {
+      frames <- values
+    }
+  }
+  frames <- normalise_timeline_values(frames, "frame")
+  time <- normalise_timeline_values(time, "time")
+  values <- if (length(time)) time else frames
+  source <- if (length(time)) "time" else if (length(frames)) "frame" else NULL
   out <- compact_list(list(
-    frames = if (is.null(frames)) NULL else unname(as.integer(frames)),
-    time = if (is.null(time)) NULL else unname(as.numeric(time)),
+    frames = if (!length(frames)) NULL else unname(frames),
+    time = if (!length(time)) NULL else unname(time),
+    values = if (!length(values)) NULL else unname(values),
+    source = source,
     duration = if (is.null(duration)) NULL else as.numeric(duration)[[1]],
     loop = isTRUE(loop),
     autoplay = isTRUE(autoplay),
-    speed = as.numeric(speed)[[1]],
+    speed = speed,
     controls = isTRUE(controls),
-    filter = filter
+    filter = filter,
+    mode = filter,
+    fps = if (is.null(fps)) NULL else normalise_timeline_fps(fps)
   ))
   class(out) <- c("ggwebgl_timeline", "list")
   out
@@ -521,20 +628,36 @@ normalise_timeline <- function(timeline) {
 
   frames <- timeline[["frames"]] %||% NULL
   time <- timeline[["time"]] %||% NULL
-  filter <- tolower(as.character(timeline[["filter"]] %||% "exact")[[1L]])
-  if (!filter %in% c("cumulative", "exact")) {
-    filter <- "exact"
+  values <- timeline[["values"]] %||% NULL
+  source <- normalise_timeline_value_source(timeline[["source"]] %||% "auto", values = values, frames = frames, time = time)
+  filter <- normalise_timeline_filter(timeline[["mode"]] %||% timeline[["filter"]] %||% "exact")
+  if (is.null(frames) && is.null(time) && !is.null(values)) {
+    if (identical(source, "time")) {
+      time <- values
+    } else {
+      frames <- values
+    }
   }
+  frames <- normalise_timeline_values(frames, "frame")
+  time <- normalise_timeline_values(time, "time")
+  values <- if (length(time)) time else frames
+  source <- if (length(time)) "time" else if (length(frames)) "frame" else NULL
 
   compact_list(list(
-    frames = if (is.null(frames)) NULL else unique(stats::na.omit(as.integer(frames))),
-    time = if (is.null(time)) NULL else unique(stats::na.omit(as.numeric(time))),
+    frames = if (!length(frames)) NULL else frames,
+    time = if (!length(time)) NULL else time,
+    values = if (!length(values)) NULL else values,
+    source = source,
     duration = as.numeric(timeline[["duration"]] %||% max(1, length(frames %||% time %||% 1)))[[1]],
     loop = isTRUE(timeline[["loop"]] %||% TRUE),
     autoplay = isTRUE(timeline[["autoplay"]] %||% FALSE),
-    speed = as.numeric(timeline[["speed"]] %||% 1)[[1]],
+    speed = normalise_timeline_speed(timeline[["speed"]] %||% 1),
     controls = isTRUE(timeline[["controls"]] %||% TRUE),
-    filter = filter
+    filter = filter,
+    mode = filter,
+    fps = if (is.null(timeline[["fps"]])) NULL else normalise_timeline_fps(timeline[["fps"]]),
+    label = timeline[["label"]] %||% NULL,
+    format = timeline[["format"]] %||% NULL
   ))
 }
 
@@ -596,7 +719,8 @@ normalise_webgl_options <- function(options = NULL, explicit_fields = NULL) {
 
   recognised_extra_fields <- c(
     "line_mode", "line_join", "line_cap",
-    "view", "selection", "dimension", "camera", "projection", "camera_state", "timeline"
+    "view", "selection", "dimension", "camera", "projection", "camera_state",
+    "depth_test", "blend_mode", "timeline", "time_scale", "transport", "interactions_spec"
   )
 
   for (field in recognised_extra_fields) {
@@ -628,6 +752,22 @@ normalise_webgl_options <- function(options = NULL, explicit_fields = NULL) {
   )
   selection <- normalise_selection(options[["selection"]] %||% NULL, interactions = interactions)
   interactions <- unique(c(interactions, selection_interactions(selection)))
+  interactions_spec <- normalise_interactions_spec(
+    options[["interactions_spec"]] %||% NULL,
+    interactions = interactions,
+    selection = selection,
+    view = view
+  )
+  if (identical(selection$mode, "none")) {
+    if (isTRUE(interactions_spec$brush) && isTRUE(interactions_spec$lasso)) {
+      selection$mode <- "brush_lasso"
+    } else if (isTRUE(interactions_spec$brush)) {
+      selection$mode <- "brush"
+    } else if (isTRUE(interactions_spec$lasso)) {
+      selection$mode <- "lasso"
+    }
+  }
+  interactions <- unique(c(interactions, interactions_spec$modes))
 
   normalised <- compact_list(list(
     shader = normalise_shader_name(options[["shader"]] %||% defaults[["shader"]]),
@@ -635,6 +775,7 @@ normalise_webgl_options <- function(options = NULL, explicit_fields = NULL) {
     transparent = isTRUE(options[["transparent"]] %||% transparent_default),
     buffer_size = normalise_buffer_size(options[["buffer_size"]] %||% defaults[["buffer_size"]]),
     interactions = interactions,
+    interactions_spec = interactions_spec,
     rendering = rendering,
     panel_overlay = normalise_panel_overlay(options[["panel_overlay"]] %||% defaults[["panel_overlay"]]),
     view = view,
@@ -643,7 +784,11 @@ normalise_webgl_options <- function(options = NULL, explicit_fields = NULL) {
     camera = if (identical(view$controller, "panzoom")) "orbit" else view$controller,
     projection = view$projection,
     camera_state = view$state,
+    depth_test = normalise_depth_test(options[["depth_test"]] %||% defaults[["depth_test"]], view$dimension),
+    blend_mode = normalise_blend_mode(options[["blend_mode"]] %||% defaults[["blend_mode"]]),
     timeline = normalise_timeline(options[["timeline"]] %||% defaults[["timeline"]]),
+    time_scale = normalise_time_scale(options[["time_scale"]] %||% defaults[["time_scale"]]),
+    transport = normalise_transport(options[["transport"]] %||% defaults[["transport"]]),
     line_mode = normalise_line_mode(options[["line_mode"]] %||% defaults[["line_mode"]]),
     line_join = normalise_line_join(options[["line_join"]] %||% defaults[["line_join"]]),
     line_cap = normalise_line_cap(options[["line_cap"]] %||% defaults[["line_cap"]]),
@@ -708,6 +853,22 @@ coalesce_colour <- function(data) {
   colour
 }
 
+coalesce_line_colour <- function(data, layer) {
+  geom_class <- ggwebgl_geom_class(layer)
+
+  if (geom_class %in% c("GeomFreqpolyWebGL", "GeomDensityWebGL")) {
+    colour <- data$colour %||% data$color %||% NULL
+
+    if (is.null(colour) || all(is.na(colour))) {
+      colour <- rep("#2C3E50", nrow(data))
+    }
+
+    return(colour)
+  }
+
+  coalesce_colour(data)
+}
+
 colour_to_rgba <- function(colour, alpha = NULL) {
   colour <- as.character(colour)
   colour[is.na(colour)] <- "#2C3E50"
@@ -741,37 +902,330 @@ rgba_to_bytes <- function(rgba) {
   as.integer(pmax(0, pmin(255, round(rgba * 255))))
 }
 
+ggwebgl_geom_registry <- function() {
+  list(
+    list(
+      name = "vectors",
+      primitive = "vectors",
+      classes = "GeomVectorWebGL",
+      inherits = character(),
+      extractor = "extract_vector_payloads"
+    ),
+    list(
+      name = "rug",
+      primitive = "vectors",
+      classes = "GeomRugWebGL",
+      inherits = character(),
+      extractor = "extract_rug_payloads"
+    ),
+    list(
+      name = "segments",
+      primitive = "vectors",
+      classes = "GeomSegmentWebGL",
+      inherits = character(),
+      extractor = "extract_vector_payloads"
+    ),
+    list(
+      name = "linerange",
+      primitive = "vectors",
+      classes = "GeomLinerangeWebGL",
+      inherits = character(),
+      extractor = "extract_linerange_payloads"
+    ),
+    list(
+      name = "errorbar",
+      primitive = "vectors",
+      classes = "GeomErrorbarWebGL",
+      inherits = character(),
+      extractor = "extract_errorbar_payloads"
+    ),
+    list(
+      name = "pointrange",
+      primitive = "mixed",
+      classes = "GeomPointrangeWebGL",
+      inherits = character(),
+      extractor = "extract_pointrange_payloads"
+    ),
+    list(
+      name = "crossbar",
+      primitive = "mixed",
+      classes = "GeomCrossbarWebGL",
+      inherits = character(),
+      extractor = "extract_crossbar_payloads"
+    ),
+    list(
+      name = "boxplot",
+      primitive = "mixed",
+      classes = "GeomBoxplotWebGL",
+      inherits = character(),
+      extractor = "extract_boxplot_payloads"
+    ),
+    list(
+      name = "rects",
+      primitive = "rects",
+      classes = "GeomRectWebGL",
+      inherits = character(),
+      extractor = "extract_rect_payloads"
+    ),
+    list(
+      name = "tiles",
+      primitive = "rects",
+      classes = "GeomTileWebGL",
+      inherits = character(),
+      extractor = "extract_rect_payloads"
+    ),
+    list(
+      name = "bars",
+      primitive = "rects",
+      classes = "GeomBarWebGL",
+      inherits = character(),
+      extractor = "extract_rect_payloads"
+    ),
+    list(
+      name = "bin2d",
+      primitive = "rects",
+      classes = "GeomBin2dWebGL",
+      inherits = character(),
+      extractor = "extract_rect_payloads"
+    ),
+    list(
+      name = "ribbon",
+      primitive = "ribbons",
+      classes = "GeomRibbonWebGL",
+      inherits = character(),
+      extractor = "extract_ribbon_payloads"
+    ),
+    list(
+      name = "area",
+      primitive = "ribbons",
+      classes = "GeomAreaWebGL",
+      inherits = character(),
+      extractor = "extract_ribbon_payloads"
+    ),
+    list(
+      name = "polygon",
+      primitive = "mesh",
+      classes = "GeomPolygonWebGL",
+      inherits = character(),
+      extractor = "extract_polygon_payloads"
+    ),
+    list(
+      name = "text",
+      primitive = "text",
+      classes = "GeomTextWebGL",
+      inherits = character(),
+      extractor = "extract_text_payloads"
+    ),
+    list(
+      name = "label",
+      primitive = "text",
+      classes = "GeomLabelWebGL",
+      inherits = character(),
+      extractor = "extract_text_payloads"
+    ),
+    list(
+      name = "violin",
+      primitive = "mesh",
+      classes = "GeomViolinWebGL",
+      inherits = character(),
+      extractor = "extract_violin_payloads"
+    ),
+    list(
+      name = "mesh",
+      primitive = "mesh",
+      classes = "GeomMeshWebGL",
+      inherits = character(),
+      extractor = "extract_mesh_payloads"
+    ),
+    list(
+      name = "surface",
+      primitive = "surface",
+      classes = "GeomSurfaceWebGL",
+      inherits = character(),
+      extractor = "extract_surface_payloads"
+    ),
+    list(
+      name = "path3d",
+      primitive = "lines",
+      classes = "GeomPath3DWebGL",
+      inherits = character(),
+      extractor = "extract_line_payloads",
+      ordered = TRUE,
+      subtype = "path3d"
+    ),
+    list(
+      name = "path",
+      primitive = "lines",
+      classes = "GeomPathWebGL",
+      inherits = character(),
+      extractor = "extract_line_payloads",
+      ordered = TRUE
+    ),
+    list(
+      name = "freqpoly",
+      primitive = "lines",
+      classes = "GeomFreqpolyWebGL",
+      inherits = character(),
+      extractor = "extract_line_payloads",
+      ordered = TRUE
+    ),
+    list(
+      name = "density",
+      primitive = "lines",
+      classes = "GeomDensityWebGL",
+      inherits = character(),
+      extractor = "extract_line_payloads",
+      ordered = TRUE
+    ),
+    list(
+      name = "density2d",
+      primitive = "lines",
+      classes = "GeomDensity2dWebGL",
+      inherits = character(),
+      extractor = "extract_line_payloads",
+      ordered = TRUE
+    ),
+    list(
+      name = "contour",
+      primitive = "lines",
+      classes = "GeomContourWebGL",
+      inherits = character(),
+      extractor = "extract_line_payloads",
+      ordered = TRUE
+    ),
+    list(
+      name = "points",
+      primitive = "points",
+      classes = "GeomPointWebGL",
+      inherits = "GeomPoint",
+      extractor = "extract_point_payloads"
+    ),
+    list(
+      name = "lines",
+      primitive = "lines",
+      classes = "GeomLineWebGL",
+      inherits = c("GeomLine", "GeomPath"),
+      extractor = "extract_line_payloads"
+    ),
+    list(
+      name = "raster",
+      primitive = "raster",
+      classes = "GeomRasterWebGL",
+      inherits = "GeomRaster",
+      extractor = "extract_raster_payloads"
+    )
+  )
+}
+
+ggwebgl_geom_class <- function(layer) {
+  class(layer$geom)[1] %||% ""
+}
+
+ggwebgl_geom_entry_matches <- function(entry, layer) {
+  geom_class <- ggwebgl_geom_class(layer)
+
+  if (length(entry$classes %||% character()) && geom_class %in% entry$classes) {
+    return(TRUE)
+  }
+
+  inherited <- entry$inherits %||% character()
+  if (length(inherited)) {
+    return(any(vapply(inherited, function(class) inherits(layer$geom, class), logical(1))))
+  }
+
+  FALSE
+}
+
+ggwebgl_geom_registry_match <- function(layer) {
+  registry <- ggwebgl_geom_registry()
+
+  for (entry in registry) {
+    if (ggwebgl_geom_entry_matches(entry, layer)) {
+      return(entry)
+    }
+  }
+
+  NULL
+}
+
+ggwebgl_geom_matches_primitive <- function(layer, primitive) {
+  entry <- ggwebgl_geom_registry_match(layer)
+  !is.null(entry) && identical(entry$primitive, primitive)
+}
+
 is_point_geom <- function(layer) {
-  !is_mesh_geom(layer) &&
-    (inherits(layer$geom, "GeomPoint") || identical(class(layer$geom)[1], "GeomPointWebGL"))
+  ggwebgl_geom_matches_primitive(layer, "points")
 }
 
 is_line_geom <- function(layer) {
-  inherits(layer$geom, "GeomLine") ||
-    inherits(layer$geom, "GeomPath") ||
-    identical(class(layer$geom)[1], "GeomLineWebGL")
+  ggwebgl_geom_matches_primitive(layer, "lines")
+}
+
+is_path3d_geom <- function(layer) {
+  entry <- ggwebgl_geom_registry_match(layer)
+  !is.null(entry) && identical(entry$subtype %||% NULL, "path3d")
+}
+
+is_ordered_path_geom <- function(layer) {
+  entry <- ggwebgl_geom_registry_match(layer)
+  !is.null(entry) && isTRUE(entry$ordered %||% FALSE)
 }
 
 is_raster_geom <- function(layer) {
-  !is_surface_geom(layer) &&
-    (inherits(layer$geom, "GeomRaster") || identical(class(layer$geom)[1], "GeomRasterWebGL"))
+  ggwebgl_geom_matches_primitive(layer, "raster")
 }
 
 is_vector_geom <- function(layer) {
-  identical(class(layer$geom)[1], "GeomVectorWebGL")
+  ggwebgl_geom_matches_primitive(layer, "vectors")
 }
 
 is_mesh_geom <- function(layer) {
-  identical(class(layer$geom)[1], "GeomMeshWebGL")
+  ggwebgl_geom_matches_primitive(layer, "mesh")
 }
 
 is_surface_geom <- function(layer) {
-  identical(class(layer$geom)[1], "GeomSurfaceWebGL")
+  ggwebgl_geom_matches_primitive(layer, "surface")
 }
 
 is_supported_geom <- function(layer) {
-  is_vector_geom(layer) || is_mesh_geom(layer) || is_surface_geom(layer) ||
-    is_point_geom(layer) || is_line_geom(layer) || is_raster_geom(layer)
+  !is.null(ggwebgl_geom_registry_match(layer))
+}
+
+split_ribbon_runs <- function(data) {
+  if (!nrow(data)) {
+    return(list())
+  }
+
+  group_chr <- as.character(data$group %||% seq_len(nrow(data)))
+  x_ok <- is.finite(as.numeric(data$x))
+  ymin_ok <- is.finite(as.numeric(data$ymin))
+  ymax_ok <- is.finite(as.numeric(data$ymax))
+  valid <- x_ok & ymin_ok & ymax_ok
+  group_levels <- unique(group_chr)
+  out <- list()
+
+  for (group_name in group_levels) {
+    group_idx <- which(group_chr == group_name)
+    if (!length(group_idx)) {
+      next
+    }
+
+    run_break <- rep(TRUE, length(group_idx))
+    if (length(group_idx) > 1L) {
+      run_break[-1] <- !(valid[group_idx][-1] & valid[group_idx][-length(group_idx)])
+    }
+
+    group_runs <- split(group_idx, cumsum(run_break))
+    group_runs <- Filter(
+      f = function(idx) {
+        length(idx) >= 2L && all(valid[idx])
+      },
+      x = group_runs
+    )
+    out <- c(out, group_runs)
+  }
+
+  out
 }
 
 split_path_runs <- function(data) {
@@ -799,4 +1253,40 @@ split_path_runs <- function(data) {
     },
     x = split_idx
   )
+}
+
+split_ordered_group_path_runs <- function(data) {
+  if (!nrow(data)) {
+    return(list())
+  }
+
+  group_chr <- as.character(data$group %||% seq_len(nrow(data)))
+  x_ok <- is.finite(as.numeric(data$x))
+  y_ok <- is.finite(as.numeric(data$y))
+  valid <- x_ok & y_ok
+  group_levels <- unique(group_chr)
+  out <- list()
+
+  for (group_name in group_levels) {
+    group_idx <- which(group_chr == group_name)
+    if (!length(group_idx)) {
+      next
+    }
+
+    run_break <- rep(TRUE, length(group_idx))
+    if (length(group_idx) > 1L) {
+      run_break[-1] <- !(valid[group_idx][-1] & valid[group_idx][-length(group_idx)])
+    }
+
+    group_runs <- split(group_idx, cumsum(run_break))
+    group_runs <- Filter(
+      f = function(idx) {
+        length(idx) >= 2L && all(valid[idx])
+      },
+      x = group_runs
+    )
+    out <- c(out, group_runs)
+  }
+
+  out
 }

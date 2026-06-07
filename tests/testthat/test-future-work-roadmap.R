@@ -1,16 +1,5 @@
 read_repo_text <- function(path) {
-  candidates <- c(
-    file.path(getwd(), path),
-    file.path(testthat::test_path(), "..", "..", path)
-  )
-  candidates <- normalizePath(candidates, winslash = "/", mustWork = FALSE)
-  found <- candidates[file.exists(candidates)]
-
-  if (!length(found)) {
-    skip(sprintf("%s is unavailable in this installed-package test context.", path))
-  }
-
-  paste(readLines(found[[1L]], warn = FALSE), collapse = "\n")
+  ggwebgl_test_read_text(path)
 }
 
 locate_future_work_example <- function() {
@@ -109,17 +98,21 @@ test_that("experimental primitive helpers create renderer-ready contracts", {
   expect_equal(mesh$vertex_count, 3L)
   expect_equal(mesh$triangle_count, 1L)
   expect_equal(mesh$indices, c(0L, 1L, 2L))
-  expect_equal(mesh$material$shading, "lambert")
+  expect_equal(mesh$material$shading, "mesh_lambert")
   expect_length(mesh$normal, 9L)
   expect_equal(mesh$pick_id, "face-a")
   expect_true(mesh$wireframe)
 
   surface <- ggwebgl_layer_surface(matrix(seq_len(9), nrow = 3L), material = ggwebgl_material(shading = "lambert", wireframe = TRUE))
-  expect_equal(surface$type, "mesh")
+  expect_equal(surface$type, "surface")
   expect_equal(surface$vertex_count, 9L)
   expect_equal(surface$triangle_count, 8L)
+  expect_equal(surface$surface_meta$shading, "surface_lambert")
+  expect_equal(surface$surface_meta$triangulation, "regular_grid")
   expect_equal(surface$material$shading, "lambert")
-  expect_length(surface$normal, surface$vertex_count * 3L)
+  expect_length(surface$normals, surface$vertex_count * 3L)
+  expect_length(surface$positions, surface$vertex_count * 3L)
+  expect_length(surface$colors, surface$vertex_count * 4L)
 })
 
 test_that("experimental scene options normalize through ggwebgl_spec", {
@@ -201,8 +194,8 @@ test_that("ggplot vector and surface geoms enter the WebGL render plan", {
   )
 
   expect_equal(surface_widget$x$render$dimension, "3d")
-  expect_equal(surface_widget$x$render$mesh_triangle_count, 8L)
-  expect_true("mesh" %in% surface_widget$x$render$primitives)
+  expect_equal(surface_widget$x$render$surface_triangle_count, 8L)
+  expect_true("surface" %in% surface_widget$x$render$primitives)
 })
 
 test_that("widget source contains experimental renderer paths", {
@@ -210,11 +203,16 @@ test_that("widget source contains experimental renderer paths", {
 
   expect_match(js, "function drawVectorLayer", fixed = TRUE)
   expect_match(js, "function drawMeshLayer", fixed = TRUE)
+  expect_match(js, "function drawSurfaceLayer", fixed = TRUE)
+  expect_match(js, "gl.drawElements(gl.TRIANGLES", fixed = TRUE)
+  expect_match(js, "surface_height_colormap", fixed = TRUE)
   expect_match(js, "function normalizeView", fixed = TRUE)
   expect_match(js, "function normalizeSelection", fixed = TRUE)
   expect_match(js, "function applyTrackballDrag", fixed = TRUE)
   expect_match(js, "function orbitQuaternion", fixed = TRUE)
-  expect_match(js, "function meshShade", fixed = TRUE)
+  expect_match(js, "function meshShadingMode", fixed = TRUE)
+  expect_match(js, "var meshVertexShaderSource", fixed = TRUE)
+  expect_match(js, "var meshFragmentShaderSource", fixed = TRUE)
   expect_match(js, "function ensureMeshLayerGpuPayload", fixed = TRUE)
   expect_match(js, "OES_element_index_uint", fixed = TRUE)
   expect_match(js, "function emitSelection", fixed = TRUE)
@@ -226,8 +224,9 @@ test_that("widget source contains experimental renderer paths", {
   expect_match(js, "function bindTimelineHandlers", fixed = TRUE)
   expect_match(js, "function project3dPoint", fixed = TRUE)
   expect_match(js, "ggwebgl__timeline", fixed = TRUE)
-  expect_match(js, "setInputValue(el.id + \"_selection\"", fixed = TRUE)
-  expect_match(js, "filter: String(source.filter", fixed = TRUE)
+  expect_match(js, "emitShinyEvent(\"_selection\"", fixed = TRUE)
+  expect_match(js, "function createTimelineState", fixed = TRUE)
+  expect_match(js, "filter: filter", fixed = TRUE)
   expect_match(js, "zend", fixed = TRUE)
   expect_match(js, "pick_id", fixed = TRUE)
 })
@@ -255,8 +254,8 @@ test_that("experimental gallery examples render htmlwidgets", {
   expect_equal(table(timeline_frames)[[1L]], table(timeline_frames)[[length(table(timeline_frames))]])
   expect_equal(widgets$camera_3d$x$render$dimension, "3d")
   expect_gt(widgets$camera_3d$x$render$vector_count, 10L)
-  expect_gt(widgets$mesh_surface$x$render$mesh_triangle_count, 0L)
-  expect_equal(widgets$mesh_surface$x$render$panels[[1L]]$layers[[1L]]$material$shading, "lambert")
+  expect_gt(widgets$mesh_surface$x$render$surface_triangle_count, 0L)
+  expect_equal(widgets$mesh_surface$x$render$panels[[1L]]$layers[[1L]]$surface_meta$shading, "surface_lambert")
 })
 
 test_that("experimental renderer capabilities vignette is registered and scoped", {

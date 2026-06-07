@@ -1,4 +1,21 @@
 dependencies:
+  - name: ggWebGL-runtime
+    version: 0.6.0
+    src: htmlwidgets
+    script:
+      - lib/math-mat4.js
+      - lib/scene.js
+      - lib/camera.js
+      - lib/program-registry.js
+      - lib/buffers.js
+      - lib/lod.js
+      - lib/picking.js
+      - lib/interactions/hover.js
+      - lib/interactions/brush.js
+      - lib/interactions/lasso.js
+      - lib/interactions/select.js
+      - lib/interactions/raycast.js
+    all_files: false
   - name: ggWebGL-styles
     version: 0.2.0
     src: htmlwidgets

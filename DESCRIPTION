@@ -1,7 +1,7 @@
 Package: ggWebGL
 Title: Browser-Native 'WebGL' Rendering for R Graphics
-Date: 2026-04-29
-Version: 0.4.0
+Date: 2026-06-02
+Version: 0.8.0
 Authors@R: c(
 	person(given = "Frederic", family= "Bertrand", role = c("cre", "aut"), 
 	email = "frederic.bertrand@lecnam.net", comment = c(ORCID = "0000-0002-0837-8281")))
@@ -20,9 +20,10 @@ License: GPL-3
 Encoding: UTF-8
 RoxygenNote: 7.3.3
 Depends: R (>= 4.1)
-Imports: ggplot2, htmltools, htmlwidgets, rlang
-Suggests: chromote, knitr, magick, pkgdown, pkgload, plotly, processx,
-        rmarkdown, shiny, testthat (>= 3.0.0)
+Imports: ggplot2, htmltools, htmlwidgets, jsonlite, rlang, utils
+Suggests: boids4R, chromote, knitr, magick, MASS, pkgdown, pkgload,
+        plotly, processx, rmarkdown, shiny, testthat (>= 3.0.0),
+        XGeoRTR
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 Config/Needs/website: pkgdown
@@ -30,6 +31,6 @@ URL: https://fbertran.github.io/ggWebGL/,
         https://github.com/fbertran/ggWebGL
 BugReports: https://github.com/fbertran/ggWebGL/issues
 NeedsCompilation: no
-Packaged: 2026-04-30 00:23:17 UTC; bertran7
+Packaged: 2026-06-06 22:08:47 UTC; bertran7
 Repository: CRAN
-Date/Publication: 2026-05-04 12:10:08 UTC
+Date/Publication: 2026-06-07 06:50:02 UTC

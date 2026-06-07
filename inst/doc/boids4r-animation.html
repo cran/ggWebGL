@@ -39,6 +39,108 @@ ul.task-list{list-style: none;}
 
 
 
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
 
 
 
@@ -241,16 +343,17 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 <div id="swarm-art-in-the-browser" class="section level1">
 <h1>Swarm Art in the Browser</h1>
-<p>This article documents an optional downstream bridge from
-<code>boids4R</code> into <code>ggWebGL</code>. The creative use case is
-generative browser art: compact schools, predator avoidance, obstacle
-corridors, murmurations, and mixed-species swarms become animated
-point/vector timelines that can be panned, zoomed, scrubbed, and
-inspected in WebGL.</p>
-<p>The CRAN-built vignette is documentation-only. It does not load
-<code>boids4R</code>, does not execute GitHub-only package code, and
-does not require optional ecosystem packages to be installed. The
-runnable bridge remains in the package example script named below.</p>
+<p><code>ggWebGL</code> can render swarm art in the browser from
+renderer-neutral <code>boids4R</code> simulations. Compact schools,
+predator avoidance, obstacle corridors, murmurations, and mixed-species
+flocks become animated point/vector timelines that can be panned,
+zoomed, scrubbed, and inspected in WebGL.</p>
+<p>The live examples are split across smaller articles so the generated
+pkgdown HTML files stay below repository hosting limits. The examples
+remain opt-in: live WebGL widgets are disabled during CRAN, package
+checks, and CI. Rich local or pkgdown rendering requires both
+<code>GGWEBGL_EVAL_COVERAGE_VIGNETTE=true</code> and
+<code>GGWEBGL_EVAL_LIVE_WIDGETS=true</code>.</p>
 </div>
 <div id="boundary" class="section level1">
 <h1>Boundary</h1>
@@ -258,61 +361,47 @@ runnable bridge remains in the package example script named below.</p>
 <ul>
 <li><code>boids4R</code> owns simulation semantics: flocking state,
 rules, scenarios, and frame export.</li>
-<li>The optional downstream bridge translates simulation frames into
-renderer primitives when <code>boids4R</code> is installed
-separately.</li>
+<li><code>boids4R::as_ggwebgl_spec()</code> translates simulation frames
+into renderer primitives and owns boid display defaults.</li>
 <li><code>ggWebGL</code> owns WebGL rendering: the htmlwidget, point and
 vector primitives, shader choice, timeline controls, hover, pan, zoom,
 and 3D orbit interaction.</li>
 </ul>
-<p>This keeps the core <code>ggWebGL</code> package self-contained for
-CRAN while preserving a clear optional integration path for development
-installations.</p>
+<p><code>boids4R</code> is a suggested package for <code>ggWebGL</code>.
+When it is unavailable, the split articles still build and report that
+live animation widgets were skipped.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>boids4r_available <span class="ot">&lt;-</span> <span class="fu">requireNamespace</span>(<span class="st">&quot;boids4R&quot;</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="cf">if</span> (<span class="sc">!</span>boids4r_available) {</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">&quot;boids4R is unavailable, so live boids animations are skipped.</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>}</span></code></pre></div>
 </div>
-<div id="runnable-optional-demo" class="section level1">
-<h1>Runnable Optional Demo</h1>
-<p>The optional example script is:</p>
-<pre class="text"><code>inst/examples/htmlwidget/downstream-boids4r-animation.R</code></pre>
-<p>When <code>boids4R</code> is installed separately, the script builds
-two widgets:</p>
+<div id="split-articles" class="section level1">
+<h1>Split Articles</h1>
 <ul>
-<li>a 2D schooling scene rendered as exact-frame animated points and
-vectors</li>
-<li>a 3D murmuration scene rendered with the structured 3D view
-path</li>
-</ul>
-<p>To run it in a development checkout or installed package, use:</p>
-<pre class="text"><code>source(system.file(&quot;examples&quot;, &quot;htmlwidget&quot;, &quot;downstream-boids4r-animation.R&quot;, package = &quot;ggWebGL&quot;))
-widgets &lt;- downstream_boids4r_widgets()
-widgets$schooling_2d
-widgets$murmuration_3d</code></pre>
-<p>The script is guarded: if <code>boids4R</code> is absent, it reports
-that the optional demo was skipped instead of failing package
-checks.</p>
-</div>
-<div id="what-to-inspect" class="section level1">
-<h1>What To Inspect</h1>
-<p>The optional widgets are intended to demonstrate renderer
-capabilities rather than package-specific simulation interpretation:</p>
-<ul>
-<li>point primitives carry boid positions for each frame</li>
-<li>vector primitives show local velocity direction</li>
-<li>exact timeline filtering makes each scrubbed frame visually
-distinct</li>
-<li>3D view metadata enables the murmuration scene to use browser camera
-controls</li>
-<li>shader settings remain owned by <code>ggWebGL</code>, not by the
-simulation package</li>
+<li><a href="boids4r-scenarios-2d.html">2D swarm scenarios</a>:
+schooling, obstacle corridor, and predator avoidance examples.</li>
+<li><a href="boids4r-scenarios-3d.html">3D swarm scenarios</a>:
+murmuration and mixed-species 3D examples with orbit camera
+interaction.</li>
+<li><a href="boids4r-custom-workflow.html">Custom corridor workflow</a>:
+a low-level <code>boids4R</code> construction comparing baseline and
+stronger avoidance parameters.</li>
 </ul>
 </div>
-<div id="cran-position" class="section level1">
-<h1>CRAN Position</h1>
-<p><code>boids4R</code> is an optional development ecosystem package. It
-is not listed in <code>ggWebGL</code> dependencies and is not required
-for installation, examples, tests, or vignettes. This article is
-retained as a documentation entry so downstream packages can see the
-intended adapter boundary without making CRAN checks depend on
-GitHub-only packages.</p>
+<div id="regeneration" class="section level1">
+<h1>Regeneration</h1>
+<p>The same pattern can be used from an installed package:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>sim <span class="ot">&lt;-</span> boids4R<span class="sc">::</span><span class="fu">boids_scenario</span>(<span class="st">&quot;mixed_species_3d&quot;</span>, <span class="at">n =</span> <span class="dv">210</span>, <span class="at">steps =</span> <span class="dv">240</span>, <span class="at">seed =</span> <span class="dv">115</span>)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>spec <span class="ot">&lt;-</span> ggWebGL<span class="sc">:::</span><span class="fu">ggwebgl_boids_display_spec</span>(</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>  sim,</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  <span class="at">vector_mode =</span> <span class="st">&quot;current&quot;</span>,</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>  <span class="at">vector_colour_mode =</span> <span class="st">&quot;species&quot;</span>,</span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>  <span class="at">obstacle_mode =</span> <span class="st">&quot;ring&quot;</span>,</span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>  <span class="at">trail =</span> <span class="st">&quot;recent&quot;</span>,</span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>  <span class="at">trail_length =</span> <span class="dv">32</span>,</span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>  <span class="at">shader =</span> <span class="st">&quot;default&quot;</span></span>
+<span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a>)</span>
+<span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a>ggWebGL<span class="sc">::</span><span class="fu">ggWebGL</span>(spec, <span class="at">height =</span> <span class="dv">540</span>)</span></code></pre></div>
 </div>
 
 

@@ -36,8 +36,7 @@ with_widget_page <- function(widget, code, width = 760, height = 520) {
   session <- browser$new_session(width = width, height = height, wait_ = TRUE)
   on.exit(try(session$close(), silent = TRUE), add = TRUE)
   session$Page$navigate(paste0("file://", normalizePath(output)), wait_ = TRUE)
-  try(session$Page$loadEventFired(wait_ = TRUE), silent = TRUE)
-  Sys.sleep(0.8)
+  wait_for_widget_ready(session, timeout_seconds = 5, settle_seconds = 0.35)
   force(code)(session)
 }
 
@@ -55,6 +54,14 @@ mouse_event <- function(session, type, x, y) {
     clickCount = if (identical(type, "mousePressed")) 1L else 0L
   )
 }
+
+test_that("lasso point-in-polygon keeps descending edge orientation", {
+  js <- ggwebgl_test_read_text("inst/htmlwidgets/ggWebGL.js")
+
+  expect_match(js, "var dy = yj - yi;", fixed = TRUE)
+  expect_match(js, "(x < (xj - xi) * (y - yi) / dy + xi)", fixed = TRUE)
+  expect_false(grepl("Math.max(1e-9, yj - yi)", js, fixed = TRUE))
+})
 
 test_that("browser smoke visibly updates brush and lasso selection", {
   if (!chromote_available()) {

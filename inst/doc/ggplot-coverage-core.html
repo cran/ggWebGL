@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Core ggplot-like WebGL layers</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Core ggplot-like WebGL layers</h1>
+
+
+<div id="TOC">
+<ul>
+<li><a href="#two-workflows" id="toc-two-workflows">Two Workflows</a>
+<ul>
+<li><a href="#applet-grammar-style-points-and-lines" id="toc-applet-grammar-style-points-and-lines">Applet: Grammar-style
+points and lines</a></li>
+<li><a href="#applet-renderer-ready-point-specification" id="toc-applet-renderer-ready-point-specification">Applet:
+Renderer-ready point specification</a></li>
+</ul></li>
+<li><a href="#coverage-summary" id="toc-coverage-summary">Coverage
+Summary</a></li>
+<li><a href="#core-2d-layers" id="toc-core-2d-layers">Core 2D Layers</a>
+<ul>
+<li><a href="#applet-ordered-2d-path-with-segments" id="toc-applet-ordered-2d-path-with-segments">Applet: Ordered 2D path
+with segments</a></li>
+<li><a href="#applet-line-sorting-versus-path-order" id="toc-applet-line-sorting-versus-path-order">Applet: Line sorting
+versus path order</a></li>
+</ul></li>
+<li><a href="#rectangles-tiles-and-bins" id="toc-rectangles-tiles-and-bins">Rectangles, Tiles, and Bins</a>
+<ul>
+<li><a href="#applet-tile-grid" id="toc-applet-tile-grid">Applet: Tile
+grid</a></li>
+<li><a href="#applet-stacked-bar-counts" id="toc-applet-stacked-bar-counts">Applet: Stacked bar counts</a></li>
+<li><a href="#applet-histogram-bins" id="toc-applet-histogram-bins">Applet: Histogram bins</a></li>
+<li><a href="#applet-two-dimensional-bins" id="toc-applet-two-dimensional-bins">Applet: Two-dimensional
+bins</a></li>
+<li><a href="#applet-explicit-rectangles" id="toc-applet-explicit-rectangles">Applet: Explicit rectangles</a></li>
+</ul></li>
+<li><a href="#curves-and-contours" id="toc-curves-and-contours">Curves
+and Contours</a></li>
+</ul>
+</div>
+
+<p>This vignette covers the core two-dimensional
+<code>ggplot2</code>-style layers and the renderer-ready specification
+workflow. The code examples construct <code>ggplot2</code>-style WebGL
+layers and, when evaluated, convert them into browser-side WebGL
+htmlwidgets with <code>ggplot_webgl()</code> or
+<code>ggWebGL()</code>.</p>
+<p>Code evaluation is disabled during CRAN, package checks, and CI
+unless explicitly enabled with
+<code>GGWEBGL_EVAL_COVERAGE_VIGNETTE=true</code> or
+<code>NOT_CRAN=true</code>. Live WebGL widget rendering is additionally
+disabled unless <code>GGWEBGL_EVAL_LIVE_WIDGETS=true</code> is set. Rich
+local or pkgdown builds should set both
+<code>GGWEBGL_EVAL_COVERAGE_VIGNETTE=true</code> and
+<code>GGWEBGL_EVAL_LIVE_WIDGETS=true</code>.</p>
+<blockquote>
+<p>Example chunks are shown but not evaluated in this build. Set
+<code>GGWEBGL_EVAL_COVERAGE_VIGNETTE=true</code> or
+<code>NOT_CRAN=true</code> to evaluate them during a local non-CI
+render.</p>
+</blockquote>
+<div id="two-workflows" class="section level1">
+<h1>Two Workflows</h1>
+<div id="applet-grammar-style-points-and-lines" class="section level2">
+<h2>Applet: Grammar-style points and lines</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(mtcars, <span class="fu">aes</span>(wt, mpg, <span class="at">colour =</span> <span class="fu">factor</span>(cyl))) <span class="sc">+</span></span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  <span class="fu">geom_point_webgl</span>() <span class="sc">+</span></span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>  <span class="fu">geom_line_webgl</span>(<span class="fu">aes</span>(<span class="at">group =</span> cyl), <span class="at">alpha =</span> <span class="fl">0.35</span>) <span class="sc">+</span></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Grammar-style points and lines&quot;</span>) <span class="sc">+</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>  <span class="fu">theme_webgl</span>(<span class="at">shader =</span> <span class="st">&quot;density_splat&quot;</span>)</span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+<div id="applet-renderer-ready-point-specification" class="section level2">
+<h2>Applet: Renderer-ready point specification</h2>
+<p>Renderer-ready specifications are useful when data have already been
+transformed into primitive payloads.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>spec <span class="ot">&lt;-</span> <span class="fu">ggwebgl_spec</span>(</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>  <span class="at">layers =</span> <span class="fu">list</span>(</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>    <span class="fu">ggwebgl_layer_points</span>(mtcars, <span class="at">x =</span> <span class="st">&quot;wt&quot;</span>, <span class="at">y =</span> <span class="st">&quot;mpg&quot;</span>, <span class="at">colour =</span> <span class="st">&quot;#2563eb&quot;</span>)</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>  ),</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>  <span class="at">labels =</span> <span class="fu">list</span>(<span class="at">title =</span> <span class="st">&quot;Renderer-ready point specification&quot;</span>),</span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>  <span class="at">webgl =</span> <span class="fu">webgl_spec</span>(<span class="at">shader =</span> <span class="st">&quot;density_splat&quot;</span>)</span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>)</span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a></span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a><span class="fu">ggWebGL</span>(spec)</span></code></pre></div>
+</div>
+</div>
+<div id="coverage-summary" class="section level1">
+<h1>Coverage Summary</h1>
+<table>
+<colgroup>
+<col width="25%" />
+<col width="25%" />
+<col width="25%" />
+<col width="25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Family</th>
+<th>Public APIs</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Points</td>
+<td><code>geom_point_webgl()</code></td>
+<td>Stable</td>
+<td>Core scatter and dense point rendering.</td>
+</tr>
+<tr class="even">
+<td>Lines and paths</td>
+<td><code>geom_line_webgl()</code>, <code>geom_path_webgl()</code>,
+<code>geom_path3d_webgl()</code></td>
+<td>Stable / Experimental</td>
+<td>Two-dimensional line/path rendering is core; 3D paths are
+experimental.</td>
+</tr>
+<tr class="odd">
+<td>Segments and vectors</td>
+<td><code>geom_segment_webgl()</code>,
+<code>geom_vector_webgl()</code></td>
+<td>Stable / Experimental</td>
+<td>Segments are plain line segments; vectors add arrow-oriented
+metadata.</td>
+</tr>
+<tr class="even">
+<td>Rectangles and tiles</td>
+<td><code>geom_rect_webgl()</code>, <code>geom_tile_webgl()</code></td>
+<td>Stable</td>
+<td>Uses <code>ggplot2</code>-built rectangle bounds.</td>
+</tr>
+<tr class="odd">
+<td>Count and bin geoms</td>
+<td><code>geom_bar_webgl()</code>, <code>geom_histogram_webgl()</code>,
+<code>geom_bin2d_webgl()</code></td>
+<td>Experimental</td>
+<td>Counts and bins are computed by <code>ggplot2</code>; WebGL
+serialization is newer than core point/line/raster paths.</td>
+</tr>
+<tr class="even">
+<td>Curves and contours</td>
+<td><code>geom_freqpoly_webgl()</code>,
+<code>geom_density_webgl()</code>, <code>geom_density2d_webgl()</code>,
+<code>geom_contour_webgl()</code></td>
+<td>Experimental</td>
+<td>Rendered as line/path primitives; see the statistical coverage
+vignette.</td>
+</tr>
+</tbody>
+</table>
+<p>Status labels reflect API maturity, test coverage, and
+rendering-contract stability; they are not simply an export list.</p>
+</div>
+<div id="core-2d-layers" class="section level1">
+<h1>Core 2D Layers</h1>
+<div id="applet-ordered-2d-path-with-segments" class="section level2">
+<h2>Applet: Ordered 2D path with segments</h2>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>trajectory <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>  <span class="at">x =</span> <span class="fu">cos</span>(<span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">2</span> <span class="sc">*</span> pi, <span class="at">length.out =</span> <span class="dv">48</span>)) <span class="sc">*</span> <span class="fu">seq</span>(<span class="fl">0.2</span>, <span class="dv">1</span>, <span class="at">length.out =</span> <span class="dv">48</span>),</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>  <span class="at">y =</span> <span class="fu">sin</span>(<span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">2</span> <span class="sc">*</span> pi, <span class="at">length.out =</span> <span class="dv">48</span>)) <span class="sc">*</span> <span class="fu">seq</span>(<span class="fl">0.2</span>, <span class="dv">1</span>, <span class="at">length.out =</span> <span class="dv">48</span>),</span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>  <span class="at">frame =</span> <span class="fu">seq_len</span>(<span class="dv">48</span>),</span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>  <span class="at">group =</span> <span class="st">&quot;spiral&quot;</span></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>)</span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a>arrows <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a>  <span class="at">x =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">0.8</span>, <span class="sc">-</span><span class="fl">0.2</span>, <span class="fl">0.4</span>),</span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a>  <span class="at">y =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">0.6</span>, <span class="fl">0.1</span>, <span class="fl">0.5</span>),</span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a>  <span class="at">xend =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">0.45</span>, <span class="fl">0.15</span>, <span class="fl">0.75</span>),</span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a>  <span class="at">yend =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">0.25</span>, <span class="fl">0.35</span>, <span class="fl">0.2</span>)</span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a>)</span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a></span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(trajectory, <span class="fu">aes</span>(x, y, <span class="at">group =</span> group)) <span class="sc">+</span></span>
+<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a>  <span class="fu">geom_path_webgl</span>(<span class="fu">aes</span>(<span class="at">frame =</span> frame), <span class="at">colour =</span> <span class="st">&quot;#2563eb&quot;</span>, <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb3-17"><a href="#cb3-17" tabindex="-1"></a>  <span class="fu">geom_point_webgl</span>(<span class="fu">aes</span>(<span class="at">frame =</span> frame), <span class="at">colour =</span> <span class="st">&quot;#0f766e&quot;</span>, <span class="at">size =</span> <span class="fl">1.8</span>) <span class="sc">+</span></span>
+<span id="cb3-18"><a href="#cb3-18" tabindex="-1"></a>  <span class="fu">geom_segment_webgl</span>(</span>
+<span id="cb3-19"><a href="#cb3-19" tabindex="-1"></a>    <span class="at">data =</span> arrows,</span>
+<span id="cb3-20"><a href="#cb3-20" tabindex="-1"></a>    <span class="fu">aes</span>(<span class="at">x =</span> x, <span class="at">y =</span> y, <span class="at">xend =</span> xend, <span class="at">yend =</span> yend),</span>
+<span id="cb3-21"><a href="#cb3-21" tabindex="-1"></a>    <span class="at">inherit.aes =</span> <span class="cn">FALSE</span>,</span>
+<span id="cb3-22"><a href="#cb3-22" tabindex="-1"></a>    <span class="at">colour =</span> <span class="st">&quot;#334155&quot;</span></span>
+<span id="cb3-23"><a href="#cb3-23" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb3-24"><a href="#cb3-24" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Ordered 2D path with segments&quot;</span>)</span>
+<span id="cb3-25"><a href="#cb3-25" tabindex="-1"></a></span>
+<span id="cb3-26"><a href="#cb3-26" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+<div id="applet-line-sorting-versus-path-order" class="section level2">
+<h2>Applet: Line sorting versus path order</h2>
+<p><code>geom_line_webgl()</code> keeps the usual line semantics, while
+<code>geom_path_webgl()</code> preserves row order within groups.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>ordered <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>  <span class="at">x =</span> <span class="fu">c</span>(<span class="dv">3</span>, <span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">4</span>),</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>  <span class="at">y =</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">3</span>, <span class="dv">2</span>, <span class="dv">4</span>),</span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a>  <span class="at">group =</span> <span class="st">&quot;ordered&quot;</span></span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a>)</span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a></span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(ordered, <span class="fu">aes</span>(x, y, <span class="at">group =</span> group)) <span class="sc">+</span></span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a>  <span class="fu">geom_line_webgl</span>(<span class="at">colour =</span> <span class="st">&quot;#64748b&quot;</span>) <span class="sc">+</span></span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a>  <span class="fu">geom_path_webgl</span>(<span class="at">colour =</span> <span class="st">&quot;#dc2626&quot;</span>, <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Line sorting versus path order&quot;</span>)</span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a></span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+</div>
+<div id="rectangles-tiles-and-bins" class="section level1">
+<h1>Rectangles, Tiles, and Bins</h1>
+<p>Rectangle-style geoms use boundaries computed by
+<code>ggplot2::ggplot_build()</code>. This keeps position adjustments
+and statistical transformations owned by <code>ggplot2</code>.</p>
+<div id="applet-tile-grid" class="section level2">
+<h2>Applet: Tile grid</h2>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>tile_grid <span class="ot">&lt;-</span> <span class="fu">expand.grid</span>(</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  <span class="at">x =</span> <span class="fu">seq_len</span>(<span class="dv">5</span>),</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>  <span class="at">y =</span> <span class="fu">seq_len</span>(<span class="dv">4</span>),</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a>  <span class="at">KEEP.OUT.ATTRS =</span> <span class="cn">FALSE</span></span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a>)</span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>tile_grid<span class="sc">$</span>value <span class="ot">&lt;-</span> <span class="fu">with</span>(tile_grid, <span class="fu">sin</span>(x <span class="sc">/</span> <span class="dv">2</span>) <span class="sc">+</span> <span class="fu">cos</span>(y <span class="sc">/</span> <span class="dv">2</span>))</span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a></span>
+<span id="cb5-8"><a href="#cb5-8" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(tile_grid, <span class="fu">aes</span>(x, y, <span class="at">fill =</span> value)) <span class="sc">+</span></span>
+<span id="cb5-9"><a href="#cb5-9" tabindex="-1"></a>  <span class="fu">geom_tile_webgl</span>(<span class="at">alpha =</span> <span class="fl">0.85</span>) <span class="sc">+</span></span>
+<span id="cb5-10"><a href="#cb5-10" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Tile grid&quot;</span>)</span>
+<span id="cb5-11"><a href="#cb5-11" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+<div id="applet-stacked-bar-counts" class="section level2">
+<h2>Applet: Stacked bar counts</h2>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(mtcars, <span class="fu">aes</span>(<span class="fu">factor</span>(cyl), <span class="at">fill =</span> <span class="fu">factor</span>(am))) <span class="sc">+</span></span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  <span class="fu">geom_bar_webgl</span>(<span class="at">position =</span> <span class="st">&quot;stack&quot;</span>) <span class="sc">+</span></span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Stacked bar counts&quot;</span>)</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+<div id="applet-histogram-bins" class="section level2">
+<h2>Applet: Histogram bins</h2>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(mtcars, <span class="fu">aes</span>(mpg)) <span class="sc">+</span></span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>  <span class="fu">geom_histogram_webgl</span>(<span class="at">binwidth =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Histogram bins&quot;</span>)</span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+<div id="applet-two-dimensional-bins" class="section level2">
+<h2>Applet: Two-dimensional bins</h2>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(mtcars, <span class="fu">aes</span>(wt, mpg)) <span class="sc">+</span></span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>  <span class="fu">geom_bin2d_webgl</span>(<span class="at">bins =</span> <span class="dv">8</span>) <span class="sc">+</span></span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Two-dimensional bins&quot;</span>)</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+<div id="applet-explicit-rectangles" class="section level2">
+<h2>Applet: Explicit rectangles</h2>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>rectangles <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>  <span class="at">xmin =</span> <span class="fu">c</span>(<span class="fl">0.0</span>, <span class="fl">1.2</span>),</span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>  <span class="at">xmax =</span> <span class="fu">c</span>(<span class="fl">1.0</span>, <span class="fl">2.0</span>),</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>  <span class="at">ymin =</span> <span class="fu">c</span>(<span class="fl">0.0</span>, <span class="fl">0.4</span>),</span>
+<span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a>  <span class="at">ymax =</span> <span class="fu">c</span>(<span class="fl">0.8</span>, <span class="fl">1.4</span>),</span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a>  <span class="at">label =</span> <span class="fu">c</span>(<span class="st">&quot;a&quot;</span>, <span class="st">&quot;b&quot;</span>)</span>
+<span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a>)</span>
+<span id="cb9-8"><a href="#cb9-8" tabindex="-1"></a></span>
+<span id="cb9-9"><a href="#cb9-9" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">ggplot</span>(rectangles) <span class="sc">+</span></span>
+<span id="cb9-10"><a href="#cb9-10" tabindex="-1"></a>  <span class="fu">geom_rect_webgl</span>(</span>
+<span id="cb9-11"><a href="#cb9-11" tabindex="-1"></a>    <span class="fu">aes</span>(<span class="at">xmin =</span> xmin, <span class="at">xmax =</span> xmax, <span class="at">ymin =</span> ymin, <span class="at">ymax =</span> ymax, <span class="at">fill =</span> label),</span>
+<span id="cb9-12"><a href="#cb9-12" tabindex="-1"></a>    <span class="at">alpha =</span> <span class="fl">0.75</span></span>
+<span id="cb9-13"><a href="#cb9-13" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb9-14"><a href="#cb9-14" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">title =</span> <span class="st">&quot;Explicit rectangles&quot;</span>)</span>
+<span id="cb9-15"><a href="#cb9-15" tabindex="-1"></a></span>
+<span id="cb9-16"><a href="#cb9-16" tabindex="-1"></a><span class="fu">ggplot_webgl</span>(p, <span class="at">height =</span> <span class="dv">420</span>)</span></code></pre></div>
+</div>
+</div>
+<div id="curves-and-contours" class="section level1">
+<h1>Curves and Contours</h1>
+<p>Curve and contour applets are in
+<code>vignette(&quot;ggplot-coverage-summaries&quot;, package = &quot;ggWebGL&quot;)</code>
+so this page keeps its live widget count moderate.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

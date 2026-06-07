@@ -3,6 +3,10 @@ HTMLWidgets.widget({
   type: "output",
 
   factory: function(el, width, height) {
+    var TIMELINE_UPDATE_MESSAGE_TYPE = "ggWebGL:updateTimeline";
+    var STAGE_MIN_DEFAULT = 260;
+    var STAGE_MIN_CONTROLS = 300;
+    var STAGE_MIN_MULTIPANEL = 320;
     var state = {
       root: null,
       title: null,
@@ -22,19 +26,23 @@ HTMLWidgets.widget({
       gl: null,
       programs: null,
       x: null,
+      requestedHeight: null,
       baseDomains: {},
       viewDomains: {},
       hover: {
         clientX: 0,
         clientY: 0,
-        panelId: null
+        panelId: null,
+        key: null
       },
+      suppressNextClick: false,
       drag: {
         active: false,
         panelId: null,
         pointerId: null,
         lastClientX: 0,
-        lastClientY: 0
+        lastClientY: 0,
+        moved: false
       },
       selection: {
         active: false,
@@ -50,8 +58,17 @@ HTMLWidgets.widget({
         result: null
       },
       timeline: {
-        frame: null,
+        values: [],
+        value: null,
+        index: 0,
+        source: "frame",
+        filter: "exact",
         playing: false,
+        speed: 1,
+        loop: false,
+        fps: null,
+        enabled: false,
+        controls: false,
         lastTick: null
       },
       camera: {
@@ -60,7 +77,10 @@ HTMLWidgets.widget({
         distance: 2.8,
         target: [0, 0, 0],
         rotation: [0, 0, 0, 1],
-        up: [0, 1, 0]
+        up: [0, 1, 0],
+        fov: 45,
+        near: 0.01,
+        far: 1000
       }
     };
 
@@ -165,6 +185,96 @@ HTMLWidgets.widget({
         : "visualization";
     }
 
+    function elementDisplayed(node) {
+      if (!node) {
+        return false;
+      }
+      var style = window.getComputedStyle ? window.getComputedStyle(node) : null;
+      return node.style.display !== "none" && (!style || style.display !== "none");
+    }
+
+    function cssPixelValue(value) {
+      var parsed = parseFloat(value);
+      return isFinite(parsed) ? parsed : 0;
+    }
+
+    function recommendedStageMinHeight(x) {
+      if (currentRenderingMode() === "publication") {
+        return 0;
+      }
+      var panels = panelList(x || state.x);
+      var hasMultiplePanels = panels.length > 1;
+      var hasTimeline = state.timelineControls && elementDisplayed(state.timelineControls);
+      var hasSelectionControls = state.selectionControls && elementDisplayed(state.selectionControls);
+      var hasSelectionStatus = state.selectionStatus && elementDisplayed(state.selectionStatus);
+
+      if (hasMultiplePanels) {
+        return STAGE_MIN_MULTIPANEL;
+      }
+      if (hasTimeline || hasSelectionControls || hasSelectionStatus) {
+        return STAGE_MIN_CONTROLS;
+      }
+      return STAGE_MIN_DEFAULT;
+    }
+
+    function recalculateWidgetChromeLayout(x) {
+      if (!state.root || !state.stage) {
+        return;
+      }
+
+      var publication = currentRenderingMode() === "publication";
+      var timelineVisible = !publication && elementDisplayed(state.timelineControls);
+      var selectionControlsVisible = !publication && elementDisplayed(state.selectionControls);
+      var selectionStatusVisible = !publication && elementDisplayed(state.selectionStatus);
+
+      state.root.classList.toggle("ggwebgl--timeline-visible", timelineVisible);
+      state.root.classList.toggle("ggwebgl--selection-controls-visible", selectionControlsVisible);
+      state.root.classList.toggle("ggwebgl--selection-status-visible", selectionStatusVisible);
+
+      if (publication) {
+        state.stage.style.minHeight = "0px";
+        state.stage.style.height = "100%";
+        el.style.minHeight = "";
+        return;
+      }
+
+      var stageMin = recommendedStageMinHeight(x);
+      var chromeNodes = [
+        state.root.querySelector(".ggwebgl__header"),
+        state.timelineControls,
+        state.selectionControls,
+        state.selectionStatus,
+        state.axes,
+        state.notes
+      ];
+      var visibleChromeRows = 0;
+      var chromeHeight = chromeNodes.reduce(function(total, node) {
+        if (!elementDisplayed(node)) {
+          return total;
+        }
+        visibleChromeRows += 1;
+        return total + node.getBoundingClientRect().height;
+      }, 0);
+      var rootStyle = window.getComputedStyle ? window.getComputedStyle(state.root) : null;
+      var rowGap = rootStyle ? cssPixelValue(rootStyle.rowGap || rootStyle.gap) : 0;
+      var requiredHeight = Math.ceil(chromeHeight + rowGap * visibleChromeRows + stageMin);
+      var requestedHeight = isFinite(Number(state.requestedHeight)) && Number(state.requestedHeight) > 0
+        ? Number(state.requestedHeight)
+        : requiredHeight;
+      var layoutHeight = Math.max(requestedHeight, requiredHeight);
+
+      if (requiredHeight > 0) {
+        el.style.minHeight = requiredHeight + "px";
+      }
+
+      var available = Math.max(stageMin, Math.floor(layoutHeight - chromeHeight - rowGap * visibleChromeRows));
+      state.stage.style.minHeight = stageMin + "px";
+      var nextHeight = available + "px";
+      if (state.stage.style.height !== nextHeight) {
+        state.stage.style.height = nextHeight;
+      }
+    }
+
     function ensureWidgetLayout() {
       var publication = currentRenderingMode() === "publication";
 
@@ -179,12 +289,13 @@ HTMLWidgets.widget({
       if (state.root) {
         state.root.style.position = "relative";
         state.root.style.width = "100%";
-        state.root.style.height = "100%";
+        state.root.style.height = publication ? "100%" : "auto";
+        state.root.style.minHeight = publication ? "0" : "100%";
         state.root.style.boxSizing = "border-box";
         state.root.style.display = "grid";
         state.root.style.gridTemplateRows = publication
           ? "minmax(0, 1fr)"
-          : "auto minmax(0, 1fr) auto auto auto auto auto";
+          : "auto auto auto auto auto auto auto";
       }
 
       if (state.stage) {
@@ -192,7 +303,7 @@ HTMLWidgets.widget({
         state.stage.style.width = "100%";
         state.stage.style.overflow = "hidden";
         state.stage.style.boxSizing = "border-box";
-        state.stage.style.minHeight = publication ? "0px" : "320px";
+        state.stage.style.minHeight = publication ? "0px" : STAGE_MIN_DEFAULT + "px";
       }
 
       if (state.canvas) {
@@ -216,9 +327,13 @@ HTMLWidgets.widget({
       }
 
       if (isFinite(resolvedHeight) && resolvedHeight > 0) {
-        el.style.height = (publication ? resolvedHeight : Math.max(320, resolvedHeight)) + "px";
-      } else if (!el.style.height) {
-        el.style.height = publication ? "480px" : "640px";
+        state.requestedHeight = publication ? resolvedHeight : Math.max(320, resolvedHeight);
+        el.style.height = state.requestedHeight + "px";
+      } else if (!state.requestedHeight) {
+        state.requestedHeight = publication ? 480 : 640;
+        if (!el.style.height) {
+          el.style.height = state.requestedHeight + "px";
+        }
       }
 
       ensureWidgetLayout();
@@ -230,11 +345,13 @@ HTMLWidgets.widget({
       "attribute float a_size;",
       "attribute vec4 a_color;",
       "attribute float a_age;",
+      "attribute float a_metric;",
       "uniform vec4 u_domain;",
       "uniform float u_point_scale;",
       "uniform float u_min_point_size;",
       "varying vec4 v_color;",
       "varying float v_age;",
+      "varying float v_metric;",
       "void main() {",
       "  float xSpan = max(1e-6, u_domain.y - u_domain.x);",
       "  float ySpan = max(1e-6, u_domain.w - u_domain.z);",
@@ -244,6 +361,28 @@ HTMLWidgets.widget({
       "  gl_PointSize = max(u_min_point_size, a_size * u_point_scale);",
       "  v_color = a_color;",
       "  v_age = a_age;",
+      "  v_metric = a_metric;",
+      "}"
+    ].join("\n");
+
+    var primitive3dVertexShaderSource = [
+      "attribute vec3 a_position3;",
+      "attribute float a_size;",
+      "attribute vec4 a_color;",
+      "attribute float a_age;",
+      "attribute float a_metric;",
+      "uniform mat4 u_view_projection;",
+      "uniform float u_point_scale;",
+      "uniform float u_min_point_size;",
+      "varying vec4 v_color;",
+      "varying float v_age;",
+      "varying float v_metric;",
+      "void main() {",
+      "  gl_Position = u_view_projection * vec4(a_position3, 1.0);",
+      "  gl_PointSize = max(u_min_point_size, a_size * u_point_scale);",
+      "  v_color = a_color;",
+      "  v_age = a_age;",
+      "  v_metric = a_metric;",
       "}"
     ].join("\n");
 
@@ -255,6 +394,18 @@ HTMLWidgets.widget({
 	  "uniform float u_density_alpha_ceiling;",
 	  "varying vec4 v_color;",
 	  "varying float v_age;",
+	  "varying float v_metric;",
+	  "vec3 trajectoryVelocityColor(float t) {",
+	  "  t = clamp(t, 0.0, 1.0);",
+	  "  vec3 low = vec3(0.08, 0.23, 0.62);",
+	  "  vec3 mid = vec3(0.08, 0.68, 0.62);",
+	  "  vec3 high = vec3(0.98, 0.72, 0.18);",
+	  "  return mix(mix(low, mid, smoothstep(0.0, 0.55, t)), high, smoothstep(0.45, 1.0, t));",
+	  "}",
+	  "vec3 trajectoryDirectionColor(float t) {",
+	  "  t = fract(clamp(t, 0.0, 1.0));",
+	  "  return 0.5 + 0.5 * cos(6.2831853 * (t + vec3(0.00, 0.33, 0.67)));",
+	  "}",
 	  "void main() {",
 	  "  vec4 color = v_color;",
 	  "",
@@ -273,6 +424,20 @@ HTMLWidgets.widget({
 	  "      color.rgb = clamp(color.rgb, 0.0, 1.0);",
 	  "      color.a = clamp(sourceAlpha * w * u_density_alpha_boost, 0.0, u_density_alpha_ceiling);",
 	  "      if (color.a < 0.003) discard;",
+	  "    } else if (u_shader_mode > 5.5 && u_shader_mode < 6.5) {",
+	  "      color.rgb = clamp(color.rgb, 0.0, 1.0);",
+	  "      float uncertainty = clamp(1.0 - v_age, 0.0, 1.0);",
+	  "      float body = smoothstep(1.0, 0.62, radius);",
+	  "      color.rgb = mix(color.rgb, vec3(0.06, 0.16, 0.28), 0.28 * uncertainty);",
+	  "      color.a = clamp(color.a * body * (1.0 - 0.72 * uncertainty), 0.02, 0.92);",
+	  "      if (color.a < 0.01) discard;",
+	  "    } else if (u_shader_mode > 6.5 && u_shader_mode < 7.5) {", // point_sprite_glow
+	  "      float glow = smoothstep(1.0, 0.0, radius);",
+	  "      float core = smoothstep(0.52, 0.0, radius);",
+	  "      vec3 boosted = min(vec3(1.0), color.rgb * 1.85 + vec3(0.10, 0.12, 0.16));",
+	  "      color.rgb = mix(color.rgb * 0.50, boosted, core);",
+	  "      color.a = max(color.a * glow, 0.16 * smoothstep(1.0, 0.68, radius));",
+	  "      if (color.a < 0.008) discard;",
 	  "    } else {",
 	  "      color.rgb = clamp(color.rgb, 0.0, 1.0);",
 	  "      float body = smoothstep(1.0, 0.65, radius);",
@@ -287,7 +452,13 @@ HTMLWidgets.widget({
 	  "    return;",
 	  "  }",
 	  "",
-	  "  if (u_shader_mode > 2.5) {",
+	  "  if (u_shader_mode > 4.5) {",
+	  "    color.rgb = mix(color.rgb, trajectoryDirectionColor(v_metric), 0.82);",
+	  "    color.a = max(0.55, color.a);",
+	  "  } else if (u_shader_mode > 3.5) {",
+	  "    color.rgb = mix(color.rgb, trajectoryVelocityColor(v_metric), 0.86);",
+	  "    color.a = max(0.55, color.a);",
+	  "  } else if (u_shader_mode > 2.5) {",
 	  "    float age = clamp(v_age, 0.0, 1.0);",
 	  "    float head = smoothstep(0.75, 1.0, age);",
 	  "    color.rgb = mix(color.rgb * 0.28, color.rgb * 1.15, age);",
@@ -302,6 +473,141 @@ HTMLWidgets.widget({
 	  "  gl_FragColor = color;",
 	  "}"
 	].join("\n");
+
+    var surfaceVertexShaderSource = [
+      "attribute vec3 a_position3;",
+      "attribute vec3 a_normal;",
+      "attribute vec4 a_color;",
+      "attribute float a_uncertainty;",
+      "uniform mat4 u_view_projection;",
+      "varying vec3 v_normal;",
+      "varying vec4 v_color;",
+      "varying float v_z;",
+      "varying float v_uncertainty;",
+      "void main() {",
+      "  gl_Position = u_view_projection * vec4(a_position3, 1.0);",
+      "  v_normal = normalize(a_normal);",
+      "  v_color = a_color;",
+      "  v_z = a_position3.z;",
+      "  v_uncertainty = a_uncertainty;",
+      "}"
+    ].join("\n");
+
+    var surfaceFragmentShaderSource = [
+      "precision mediump float;",
+      "uniform float u_shading_mode;",
+      "uniform vec3 u_light_dir;",
+      "uniform vec2 u_z_range;",
+      "varying vec3 v_normal;",
+      "varying vec4 v_color;",
+      "varying float v_z;",
+      "varying float v_uncertainty;",
+      "vec3 heightColor(float t) {",
+      "  vec3 low = vec3(0.11, 0.37, 0.33);",
+      "  vec3 mid = vec3(0.92, 0.72, 0.34);",
+      "  vec3 high = vec3(0.95, 0.97, 0.99);",
+      "  return mix(mix(low, mid, smoothstep(0.0, 0.62, t)), high, smoothstep(0.56, 1.0, t));",
+      "}",
+      "void main() {",
+      "  vec4 color = v_color;",
+      "  if (u_shading_mode > 1.5 && u_shading_mode < 2.5) {",
+      "    float t = clamp((v_z - u_z_range.x) / max(1e-6, u_z_range.y - u_z_range.x), 0.0, 1.0);",
+      "    color.rgb = heightColor(t);",
+      "  }",
+      "  if (u_shading_mode > 0.5 && u_shading_mode < 1.5) {",
+      "    float diffuse = max(dot(normalize(v_normal), normalize(u_light_dir)), 0.0);",
+      "    color.rgb *= 0.34 + 0.76 * diffuse;",
+      "  }",
+      "  if (u_shading_mode > 2.5) {",
+      "    color.a *= 1.0 - clamp(v_uncertainty, 0.0, 0.92);",
+      "  }",
+      "  gl_FragColor = color;",
+      "}"
+    ].join("\n");
+
+    var meshVertexShaderSource = [
+      "attribute vec3 a_position3;",
+      "attribute vec3 a_normal;",
+      "attribute vec4 a_color;",
+      "attribute float a_scalar;",
+      "uniform mat4 u_view_projection;",
+      "varying vec3 v_normal;",
+      "varying vec4 v_color;",
+      "varying float v_scalar;",
+      "varying float v_z;",
+      "void main() {",
+      "  gl_Position = u_view_projection * vec4(a_position3, 1.0);",
+      "  v_normal = normalize(a_normal);",
+      "  v_color = a_color;",
+      "  v_scalar = a_scalar;",
+      "  v_z = a_position3.z;",
+      "}"
+    ].join("\n");
+
+    var meshFragmentShaderSource = [
+      "precision mediump float;",
+      "uniform float u_shading_mode;",
+      "uniform vec3 u_light_dir;",
+      "uniform vec2 u_scalar_range;",
+      "uniform float u_ambient;",
+      "uniform float u_diffuse;",
+      "uniform float u_specular;",
+      "varying vec3 v_normal;",
+      "varying vec4 v_color;",
+      "varying float v_scalar;",
+      "varying float v_z;",
+      "vec3 meshScalarColor(float t) {",
+      "  vec3 low = vec3(0.12, 0.22, 0.52);",
+      "  vec3 mid = vec3(0.10, 0.68, 0.58);",
+      "  vec3 high = vec3(0.97, 0.75, 0.22);",
+      "  return mix(mix(low, mid, smoothstep(0.0, 0.58, t)), high, smoothstep(0.45, 1.0, t));",
+      "}",
+      "void main() {",
+      "  vec4 color = v_color;",
+      "  if (u_shading_mode > 2.5 && u_shading_mode < 3.5) {",
+      "    float t = clamp((v_scalar - u_scalar_range.x) / max(1e-6, u_scalar_range.y - u_scalar_range.x), 0.0, 1.0);",
+      "    color.rgb = meshScalarColor(t);",
+      "  }",
+      "  if (u_shading_mode > 0.5 && u_shading_mode < 2.5) {",
+      "    vec3 normal = normalize(v_normal);",
+      "    vec3 light = normalize(u_light_dir);",
+      "    float lambert = max(dot(normal, light), 0.0);",
+      "    float shade = clamp(u_ambient + u_diffuse * lambert, 0.0, 1.8);",
+      "    if (u_shading_mode > 1.5) {",
+      "      vec3 viewDir = vec3(0.0, 0.0, 1.0);",
+      "      vec3 halfDir = normalize(light + viewDir);",
+      "      float spec = pow(max(dot(normal, halfDir), 0.0), 18.0) * u_specular;",
+      "      color.rgb = color.rgb * shade + vec3(spec);",
+      "    } else {",
+      "      color.rgb *= shade;",
+      "    }",
+      "  }",
+      "  if (u_shading_mode > 3.5) {",
+      "    color.rgb = mix(color.rgb, vec3(0.04, 0.08, 0.14), 0.22);",
+      "    color.a = max(color.a, 0.95);",
+      "  }",
+      "  gl_FragColor = color;",
+      "}"
+    ].join("\n");
+
+    var meshPickVertexShaderSource = [
+      "attribute vec3 a_position3;",
+      "attribute vec4 a_pick_color;",
+      "uniform mat4 u_view_projection;",
+      "varying vec4 v_pick_color;",
+      "void main() {",
+      "  gl_Position = u_view_projection * vec4(a_position3, 1.0);",
+      "  v_pick_color = a_pick_color;",
+      "}"
+    ].join("\n");
+
+    var meshPickFragmentShaderSource = [
+      "precision mediump float;",
+      "varying vec4 v_pick_color;",
+      "void main() {",
+      "  gl_FragColor = v_pick_color;",
+      "}"
+    ].join("\n");
 
     var rasterVertexShaderSource = [
       "attribute vec2 a_position;",
@@ -321,9 +627,23 @@ HTMLWidgets.widget({
     var rasterFragmentShaderSource = [
       "precision mediump float;",
       "uniform sampler2D u_texture;",
+      "uniform float u_shader_mode;",
       "varying vec2 v_texcoord;",
       "void main() {",
-      "  gl_FragColor = texture2D(u_texture, v_texcoord);",
+      "  vec4 color = texture2D(u_texture, v_texcoord);",
+      "  if (u_shader_mode > 1.5) {", // raster_contour_overlay
+      "    float luminance = dot(color.rgb, vec3(0.299, 0.587, 0.114));",
+      "    float band = abs(fract(luminance * 8.0) - 0.5);",
+      "    float contour = smoothstep(0.055, 0.0, band);",
+      "    color.rgb = mix(color.rgb, vec3(0.05, 0.09, 0.16), contour * 0.85);",
+      "    color.a = max(color.a, contour * 0.9);",
+      "  } else if (u_shader_mode > 0.5) {", // raster_threshold
+      "    float luminance = dot(color.rgb, vec3(0.299, 0.587, 0.114));",
+      "    float keep = step(0.50, luminance);",
+      "    color.rgb = mix(vec3(0.88, 0.92, 0.96), color.rgb, keep);",
+      "    color.a *= mix(0.18, 1.0, keep);",
+      "  }",
+      "  gl_FragColor = color;",
       "}"
     ].join("\n");
 
@@ -350,11 +670,18 @@ HTMLWidgets.widget({
       return [];
     }
 
+    function isArrayLike(values) {
+      if (window.ggWebGLBuffers && typeof window.ggWebGLBuffers.isArrayLike === "function") {
+        return window.ggWebGLBuffers.isArrayLike(values);
+      }
+      return Array.isArray(values) || ArrayBuffer.isView(values);
+    }
+
     function normalizeNumberArray(values) {
-      if (!Array.isArray(values)) {
+      if (!isArrayLike(values)) {
         return [];
       }
-      return values.map(Number).filter(function(value) { return isFinite(value); });
+      return Array.prototype.slice.call(values).map(Number).filter(function(value) { return isFinite(value); });
     }
 
     function normalizeCameraState(source) {
@@ -452,21 +779,73 @@ HTMLWidgets.widget({
       };
     }
 
+    function normalizeInteractionsSpec(source, interactions, selection, view) {
+      source = source && typeof source === "object" ? source : null;
+      interactions = normalizeStringArray(interactions);
+      selection = selection && typeof selection === "object" ? selection : normalizeSelection(null, interactions);
+      view = view && typeof view === "object" ? view : {};
+
+      var brushSelected = selection.mode === "brush" || selection.mode === "brush_lasso";
+      var lassoSelected = selection.mode === "lasso" || selection.mode === "brush_lasso";
+      var out = source ? {
+        hover: source.hover === true,
+        click: source.click === true,
+        brush: source.brush === true || brushSelected,
+        lasso: source.lasso === true || lassoSelected,
+        camera: source.camera === true,
+        shiny: source.shiny !== false
+      } : {
+        hover: interactions.indexOf("hover") !== -1,
+        click: interactions.indexOf("click") !== -1 || interactions.indexOf("select") !== -1,
+        brush: interactions.indexOf("brush") !== -1 || brushSelected,
+        lasso: interactions.indexOf("lasso") !== -1 || lassoSelected,
+        camera: interactions.indexOf("camera") !== -1 || view.dimension === "3d",
+        shiny: true
+      };
+      var modes = [];
+      if (out.hover) modes.push("hover");
+      if (out.click) modes.push("click");
+      if (out.brush) modes.push("brush");
+      if (out.lasso) modes.push("lasso");
+      if (out.camera) modes.push("camera");
+      out.modes = modes;
+      return out;
+    }
+
     function normalizeTimeline(source) {
       if (!source || typeof source !== "object") {
         return null;
       }
       var frames = normalizeNumberArray(source.frames).map(function(value) { return Math.round(value); });
       var times = normalizeNumberArray(source.time);
+      var sourceValues = normalizeNumberArray(source.values);
+      var sourceName = String(source.source || (times.length ? "time" : "frame")).toLowerCase();
+      if (["frame", "time"].indexOf(sourceName) === -1) {
+        sourceName = times.length ? "time" : "frame";
+      }
+      if (!frames.length && !times.length && sourceValues.length) {
+        if (sourceName === "time") {
+          times = sourceValues.slice();
+        } else {
+          frames = sourceValues.map(function(value) { return Math.round(value); });
+        }
+      }
+      var values = times.length ? times.slice() : frames.slice();
+      sourceName = times.length ? "time" : (frames.length ? "frame" : sourceName);
+      var filter = String(source.mode || source.filter || "exact").toLowerCase() === "cumulative" ? "cumulative" : "exact";
       return {
         frames: frames,
         time: times,
+        values: values,
+        source: sourceName,
         duration: isFinite(Number(source.duration)) ? Math.max(0.1, Number(source.duration)) : Math.max(1, frames.length || times.length || 1),
         loop: source.loop !== false,
         autoplay: source.autoplay === true,
         speed: isFinite(Number(source.speed)) ? Math.max(0.05, Number(source.speed)) : 1,
         controls: source.controls !== false,
-        filter: String(source.filter || "exact").toLowerCase() === "cumulative" ? "cumulative" : "exact"
+        filter: filter,
+        mode: filter,
+        fps: isFinite(Number(source.fps)) ? Math.max(0.05, Number(source.fps)) : null
       };
     }
 
@@ -481,6 +860,10 @@ HTMLWidgets.widget({
         shader = "trajectory_age";
       } else if (shader === "trajectory-glow" || shader === "glow") {
         shader = "trajectory_age_glow";
+      } else if (shader === "trajectory-velocity" || shader === "velocity") {
+        shader = "trajectory_velocity";
+      } else if (shader === "trajectory-direction" || shader === "direction") {
+        shader = "trajectory_direction";
       }
 
       var lineMode = String(source.line_mode || extra.line_mode || "auto").toLowerCase();
@@ -492,8 +875,11 @@ HTMLWidgets.widget({
       var dimension = view.dimension;
       var camera = view.controller === "panzoom" ? "orbit" : view.controller;
       var projection = view.projection;
+      var depthTest = source.depth_test === undefined ? dimension === "3d" : source.depth_test !== false;
+      var blendMode = String(source.blend_mode || extra.blend_mode || "auto").toLowerCase();
       var interactions = normalizeStringArray(source.interactions);
       var selection = normalizeSelection(source.selection, interactions);
+      var interactionsSpec = normalizeInteractionsSpec(source.interactions_spec || source.interactionsSpec || null, interactions, selection, view);
 
       if (["visualization", "publication"].indexOf(rendering) === -1) {
         rendering = "visualization";
@@ -514,6 +900,20 @@ HTMLWidgets.widget({
         if (interactions.indexOf("brush") === -1) interactions.push("brush");
         if (interactions.indexOf("lasso") === -1) interactions.push("lasso");
       }
+      interactionsSpec.modes.forEach(function(mode) {
+        if (interactions.indexOf(mode) === -1) {
+          interactions.push(mode);
+        }
+      });
+      if (selection.mode === "none") {
+        if (interactionsSpec.brush && interactionsSpec.lasso) {
+          selection.mode = "brush_lasso";
+        } else if (interactionsSpec.brush) {
+          selection.mode = "brush";
+        } else if (interactionsSpec.lasso) {
+          selection.mode = "lasso";
+        }
+      }
 
       return {
         shader: shader,
@@ -521,6 +921,7 @@ HTMLWidgets.widget({
         transparent: source.transparent !== undefined ? source.transparent !== false : rendering !== "publication",
         buffer_size: Number(source.buffer_size) || 65536,
         interactions: interactions,
+        interactions_spec: interactionsSpec,
         rendering: rendering,
         panel_overlay: panelOverlay,
         view: view,
@@ -529,6 +930,8 @@ HTMLWidgets.widget({
         camera: camera,
         projection: projection,
         camera_state: view.state,
+        depth_test: depthTest,
+        blend_mode: ["auto", "alpha", "additive", "premultiplied"].indexOf(blendMode) !== -1 ? blendMode : "auto",
         timeline: normalizeTimeline(source.timeline),
         line_mode: ["auto", "native", "quad"].indexOf(lineMode) !== -1 ? lineMode : "auto",
         line_join: ["bevel", "round"].indexOf(lineJoin) !== -1 ? lineJoin : "bevel",
@@ -593,7 +996,7 @@ HTMLWidgets.widget({
       source = source && typeof source === "object" ? source : {};
       var shading = String(source.shading || "flat").toLowerCase();
       var cull = String(source.cull || "back").toLowerCase();
-      if (["flat", "lambert"].indexOf(shading) === -1) {
+      if (["flat", "lambert", "mesh_flat", "mesh_lambert", "mesh_phong_simple", "mesh_scalar_colormap", "mesh_selection_highlight"].indexOf(shading) === -1) {
         shading = "flat";
       }
       if (["back", "none"].indexOf(cull) === -1) {
@@ -616,14 +1019,19 @@ HTMLWidgets.widget({
 
       if (type === "points") {
         var pointRows = Number(source.rows);
-        var pointX = Array.isArray(source.x) ? source.x.map(Number) : [];
-        var pointY = Array.isArray(source.y) ? source.y.map(Number) : [];
-        var pointSize = Array.isArray(source.size) ? source.size.map(Number) : [];
-        var pointAge = Array.isArray(source.age) ? source.age.map(Number) : [];
+        var compactDecoded = null;
+        if (source.compact && window.ggWebGLBuffers &&
+            typeof window.ggWebGLBuffers.materializePointLayerCompact === "function") {
+          compactDecoded = window.ggWebGLBuffers.materializePointLayerCompact(source.compact);
+        }
+        var pointX = compactDecoded ? compactDecoded.x : (Array.isArray(source.x) ? source.x.map(Number) : []);
+        var pointY = compactDecoded ? compactDecoded.y : (Array.isArray(source.y) ? source.y.map(Number) : []);
+        var pointSize = compactDecoded ? compactDecoded.size : (Array.isArray(source.size) ? source.size.map(Number) : []);
+        var pointAge = compactDecoded ? compactDecoded.age : (Array.isArray(source.age) ? source.age.map(Number) : []);
         var pointRgba = Array.isArray(source.rgba) ? source.rgba.map(Number) : [];
         var pointLabel = Array.isArray(source.label) ? source.label.map(String) : [];
         var pointId = Array.isArray(source.id) ? source.id.map(String) : [];
-        var pointZ = Array.isArray(source.z) ? source.z.map(Number) : [];
+        var pointZ = compactDecoded ? compactDecoded.z : (Array.isArray(source.z) ? source.z.map(Number) : []);
         var pointFrame = Array.isArray(source.frame) ? source.frame.map(Number) : [];
         var pointTime = Array.isArray(source.time) ? source.time.map(Number) : [];
         var pointCount = Math.min(
@@ -649,7 +1057,11 @@ HTMLWidgets.widget({
           id: pointId.slice(0, pointCount),
           frame: pointFrame.slice(0, pointCount),
           time: pointTime.slice(0, pointCount),
-          rgba: pointRgba.slice(0, pointCount * 4)
+          rgba: pointRgba.slice(0, pointCount * 4),
+          compact: source.compact && typeof source.compact === "object" ? source.compact : null,
+          compact_color: compactDecoded ? compactDecoded.color : null,
+          transport: source.transport && typeof source.transport === "object" ? source.transport : null,
+          lod: source.lod && typeof source.lod === "object" ? source.lod : null
         };
       }
 
@@ -698,6 +1110,149 @@ HTMLWidgets.widget({
         };
       }
 
+      if (type === "text") {
+        var textRows = Number(source.rows);
+        var textX = Array.isArray(source.x) ? source.x.map(Number) : [];
+        var textY = Array.isArray(source.y) ? source.y.map(Number) : [];
+        var textLabel = Array.isArray(source.label) ? source.label.map(String) : [];
+        var textSize = Array.isArray(source.size) ? source.size.map(Number) : [];
+        var textAngle = Array.isArray(source.angle) ? source.angle.map(Number) : [];
+        var textHjust = Array.isArray(source.hjust) ? source.hjust.map(Number) : [];
+        var textVjust = Array.isArray(source.vjust) ? source.vjust.map(Number) : [];
+        var textRgba = Array.isArray(source.rgba) ? source.rgba.map(Number) : [];
+        var textFrame = Array.isArray(source.frame) ? source.frame.map(Number) : [];
+        var textTime = Array.isArray(source.time) ? source.time.map(Number) : [];
+        var textFamily = Array.isArray(source.family) ? source.family.map(String) : [];
+        var textFontface = Array.isArray(source.fontface) ? source.fontface.map(String) : [];
+        var textLineheight = Array.isArray(source.lineheight) ? source.lineheight.map(Number) : [];
+        var textCount = Math.min(
+          isFinite(textRows) && textRows > 0 ? textRows : Number.MAX_SAFE_INTEGER,
+          textX.length,
+          textY.length,
+          textLabel.length
+        );
+
+        if (!isFinite(textCount) || textCount < 0) {
+          textCount = 0;
+        }
+
+        return {
+          type: "text",
+          geom: source.geom ? String(source.geom) : null,
+          rows: textCount,
+          overlay: true,
+          x: textX.slice(0, textCount),
+          y: textY.slice(0, textCount),
+          label: textLabel.slice(0, textCount),
+          size: textSize.slice(0, textCount),
+          angle: textAngle.slice(0, textCount),
+          hjust: textHjust.slice(0, textCount),
+          vjust: textVjust.slice(0, textCount),
+          family: textFamily.slice(0, textCount),
+          fontface: textFontface.slice(0, textCount),
+          lineheight: textLineheight.slice(0, textCount),
+          frame: textFrame.slice(0, textCount),
+          time: textTime.slice(0, textCount),
+          rgba: textRgba.slice(0, textCount * 4),
+          label_box: source.label_box && typeof source.label_box === "object" ? source.label_box : null
+        };
+      }
+
+      if (type === "rects") {
+        var rectRows = Number(source.rows);
+        var rectXmin = Array.isArray(source.xmin) ? source.xmin.map(Number) : [];
+        var rectXmax = Array.isArray(source.xmax) ? source.xmax.map(Number) : [];
+        var rectYmin = Array.isArray(source.ymin) ? source.ymin.map(Number) : [];
+        var rectYmax = Array.isArray(source.ymax) ? source.ymax.map(Number) : [];
+        var rectRgba = Array.isArray(source.rgba) ? source.rgba.map(Number) : [];
+        var rectStrokeRgba = Array.isArray(source.stroke_rgba) ? source.stroke_rgba.map(Number) : [];
+        var rectLinewidth = Array.isArray(source.linewidth) ? source.linewidth.map(Number) : [];
+        var rectCountValues = Array.isArray(source.count) ? source.count.map(Number) : [];
+        var rectDensityValues = Array.isArray(source.density) ? source.density.map(Number) : [];
+        var rectFrame = Array.isArray(source.frame) ? source.frame.map(Number) : [];
+        var rectTime = Array.isArray(source.time) ? source.time.map(Number) : [];
+        var rectCount = Math.min(
+          isFinite(rectRows) && rectRows > 0 ? rectRows : Number.MAX_SAFE_INTEGER,
+          rectXmin.length,
+          rectXmax.length,
+          rectYmin.length,
+          rectYmax.length
+        );
+
+        if (!isFinite(rectCount) || rectCount < 0) {
+          rectCount = 0;
+        }
+
+        return {
+          type: "rects",
+          geom: source.geom ? String(source.geom) : null,
+          rows: rectCount,
+          xmin: rectXmin.slice(0, rectCount),
+          xmax: rectXmax.slice(0, rectCount),
+          ymin: rectYmin.slice(0, rectCount),
+          ymax: rectYmax.slice(0, rectCount),
+          rgba: rectRgba.slice(0, rectCount * 4),
+          stroke_rgba: rectStrokeRgba.slice(0, rectCount * 4),
+          linewidth: rectLinewidth.slice(0, rectCount),
+          count: rectCountValues.slice(0, rectCount),
+          density: rectDensityValues.slice(0, rectCount),
+          frame: rectFrame.slice(0, rectCount),
+          time: rectTime.slice(0, rectCount)
+        };
+      }
+
+      if (type === "ribbons") {
+        var ribbonStrips = Array.isArray(source.strips)
+          ? source.strips.map(function(stripSource) {
+              var strip = stripSource && typeof stripSource === "object" ? stripSource : {};
+              var stripRows = Number(strip.rows);
+              var stripX = Array.isArray(strip.x) ? strip.x.map(Number) : [];
+              var stripYmin = Array.isArray(strip.ymin) ? strip.ymin.map(Number) : [];
+              var stripYmax = Array.isArray(strip.ymax) ? strip.ymax.map(Number) : [];
+              var stripRgba = Array.isArray(strip.rgba) ? strip.rgba.map(Number) : [];
+              var stripStrokeRgba = Array.isArray(strip.stroke_rgba) ? strip.stroke_rgba.map(Number) : [];
+              var stripFrame = Array.isArray(strip.frame) ? strip.frame.map(Number) : [];
+              var stripTime = Array.isArray(strip.time) ? strip.time.map(Number) : [];
+              var stripCount = Math.min(
+                isFinite(stripRows) && stripRows > 0 ? stripRows : Number.MAX_SAFE_INTEGER,
+                stripX.length,
+                stripYmin.length,
+                stripYmax.length
+              );
+
+              if (!isFinite(stripCount) || stripCount < 0) {
+                stripCount = 0;
+              }
+
+              return {
+                rows: stripCount,
+                group: strip.group !== undefined ? String(strip.group) : null,
+                x: stripX.slice(0, stripCount),
+                ymin: stripYmin.slice(0, stripCount),
+                ymax: stripYmax.slice(0, stripCount),
+                width: isFinite(Number(strip.width)) ? Number(strip.width) : 0,
+                rgba: stripRgba.slice(0, stripCount * 4),
+                stroke_rgba: stripStrokeRgba.slice(0, stripCount * 4),
+                frame: stripFrame.slice(0, stripCount),
+                time: stripTime.slice(0, stripCount)
+              };
+            }).filter(function(strip) { return strip.rows >= 2; })
+          : [];
+        var ribbonRows = ribbonStrips.reduce(function(total, strip) { return total + strip.rows; }, 0);
+        var ribbonTriangleCount = ribbonStrips.reduce(function(total, strip) {
+          return total + Math.max(0, strip.rows - 1) * 2;
+        }, 0);
+
+        return {
+          type: "ribbons",
+          geom: source.geom ? String(source.geom) : null,
+          rows: ribbonRows,
+          strip_count: ribbonStrips.length,
+          triangle_count: ribbonTriangleCount,
+          strips: ribbonStrips
+        };
+      }
+
       if (type === "lines") {
         var paths = linePathList(source.paths).map(normalizeLinePath).filter(function(pathSpec) {
           return pathSpec.rows >= 2;
@@ -734,7 +1289,9 @@ HTMLWidgets.widget({
         var meshZ = Array.isArray(source.z) ? source.z.map(Number) : [];
         var meshNormal = Array.isArray(source.normal) ? source.normal.map(Number) : [];
         var meshIndices = Array.isArray(source.indices) ? source.indices.map(function(value) { return Math.max(0, Math.floor(Number(value))); }) : [];
+        var meshWireIndices = Array.isArray(source.wire_indices) ? source.wire_indices.map(function(value) { return Math.max(0, Math.floor(Number(value))); }) : [];
         var meshRgba = Array.isArray(source.rgba) ? source.rgba.map(Number) : [];
+        var meshScalar = Array.isArray(source.scalar) ? source.scalar.map(Number) : [];
         var meshVertexCount = Math.min(
           isFinite(Number(source.vertex_count)) ? Number(source.vertex_count) : Number.MAX_SAFE_INTEGER,
           meshX.length,
@@ -756,12 +1313,63 @@ HTMLWidgets.widget({
           y: meshY.slice(0, meshVertexCount),
           z: meshZ.slice(0, meshVertexCount),
           indices: meshIndices.slice(0, meshTriangleCount * 3),
+          wire_indices: meshWireIndices,
           normal: meshNormal.slice(0, meshVertexCount * 3),
           rgba: meshRgba.slice(0, meshVertexCount * 4),
+          scalar: meshScalar.slice(0, meshVertexCount),
+          scalar_range: Array.isArray(source.scalar_range) ? source.scalar_range.map(Number).slice(0, 2) : [],
           id: Array.isArray(source.id) ? source.id.map(String).slice(0, meshVertexCount) : [],
           pick_id: Array.isArray(source.pick_id) ? source.pick_id.map(String).slice(0, meshTriangleCount) : [],
           material: normalizeMaterial(source.material, source.wireframe),
-          wireframe: source.wireframe === true || (source.material && source.material.wireframe === true)
+          wireframe: source.wireframe === true || (source.material && source.material.wireframe === true),
+          bbox3d: source.bbox3d && typeof source.bbox3d === "object" ? source.bbox3d : null
+        };
+      }
+
+      if (type === "surface") {
+        var surfacePositions = Array.isArray(source.positions) ? source.positions.map(Number) : [];
+        var surfaceNormals = Array.isArray(source.normals) ? source.normals.map(Number) : [];
+        var surfaceColors = Array.isArray(source.colors) ? source.colors.map(Number) : [];
+        var surfaceIndices = Array.isArray(source.indices) ? source.indices.map(function(value) { return Math.max(0, Math.floor(Number(value))); }) : [];
+        var surfaceWireIndices = Array.isArray(source.wire_indices) ? source.wire_indices.map(function(value) { return Math.max(0, Math.floor(Number(value))); }) : [];
+        var surfaceUncertainty = Array.isArray(source.uncertainty) ? source.uncertainty.map(Number) : [];
+        var surfaceVertexCount = Math.min(
+          isFinite(Number(source.vertex_count)) ? Number(source.vertex_count) : Number.MAX_SAFE_INTEGER,
+          Math.floor(surfacePositions.length / 3)
+        );
+        var surfaceTriangleCount = Math.floor(surfaceIndices.length / 3);
+        var surfaceMeta = source.surface_meta && typeof source.surface_meta === "object" ? source.surface_meta : {};
+
+        if (!isFinite(surfaceVertexCount) || surfaceVertexCount < 0) {
+          surfaceVertexCount = 0;
+        }
+
+        return {
+          type: "surface",
+          geom: source.geom ? String(source.geom) : null,
+          rows: surfaceVertexCount,
+          vertex_count: surfaceVertexCount,
+          triangle_count: surfaceTriangleCount,
+          positions: surfacePositions.slice(0, surfaceVertexCount * 3),
+          normals: surfaceNormals.slice(0, surfaceVertexCount * 3),
+          colors: surfaceColors.slice(0, surfaceVertexCount * 4),
+          indices: surfaceIndices.slice(0, surfaceTriangleCount * 3),
+          wire_indices: surfaceWireIndices,
+          contours: Array.isArray(source.contours) ? source.contours.map(normalizeLinePath).filter(function(pathSpec) { return pathSpec.rows >= 2; }) : [],
+          uncertainty: surfaceUncertainty.slice(0, surfaceVertexCount),
+          material: normalizeMaterial(source.material, source.wireframe),
+          pick_id: Array.isArray(source.pick_id) ? source.pick_id.map(String).slice(0, surfaceTriangleCount) : [],
+          wireframe: source.wireframe === true || (source.material && source.material.wireframe === true),
+          bbox3d: source.bbox3d && typeof source.bbox3d === "object" ? source.bbox3d : null,
+          surface_meta: {
+            nrow: Number(surfaceMeta.nrow) || 0,
+            ncol: Number(surfaceMeta.ncol) || 0,
+            x: Array.isArray(surfaceMeta.x) ? surfaceMeta.x.map(Number) : [],
+            y: Array.isArray(surfaceMeta.y) ? surfaceMeta.y.map(Number) : [],
+            z_range: Array.isArray(surfaceMeta.z_range) ? surfaceMeta.z_range.map(Number).slice(0, 2) : [],
+            shading: surfaceMeta.shading ? String(surfaceMeta.shading) : "surface_lambert",
+            triangulation: surfaceMeta.triangulation ? String(surfaceMeta.triangulation) : "regular_grid"
+          }
         };
       }
 
@@ -795,23 +1403,49 @@ HTMLWidgets.widget({
       var vectorCount = layers
         .filter(function(layerSpec) { return layerSpec.type === "vectors"; })
         .reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0);
+      var rectCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "rects"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0);
+      var ribbonCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "ribbons"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.strip_count; }, 0);
+      var ribbonVertexCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "ribbons"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0);
+      var ribbonTriangleCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "ribbons"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.triangle_count; }, 0);
+      var textCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "text"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0);
       var meshVertexCount = layers
         .filter(function(layerSpec) { return layerSpec.type === "mesh"; })
         .reduce(function(total, layerSpec) { return total + layerSpec.vertex_count; }, 0);
       var meshTriangleCount = layers
         .filter(function(layerSpec) { return layerSpec.type === "mesh"; })
         .reduce(function(total, layerSpec) { return total + layerSpec.triangle_count; }, 0);
+      var surfaceVertexCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "surface"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.vertex_count; }, 0);
+      var surfaceTriangleCount = layers
+        .filter(function(layerSpec) { return layerSpec.type === "surface"; })
+        .reduce(function(total, layerSpec) { return total + layerSpec.triangle_count; }, 0);
 
       return {
         panel_id: source.panel_id !== undefined ? source.panel_id : (index + 1),
         row: Math.max(1, Number(source.row) || 1),
         col: Math.max(1, Number(source.col) || 1),
+        scale_x: Number(source.scale_x) || 1,
+        scale_y: Number(source.scale_y) || 1,
         label: source.label ? String(source.label) : null,
         bounds: source.bounds && typeof source.bounds === "object" ? source.bounds : null,
         viewport: {
           x: normaliseAxisRange(source.viewport && source.viewport.x, [0, 1]),
           y: normaliseAxisRange(source.viewport && source.viewport.y, [0, 1])
         },
+        viewport_explicit: !!(source.viewport && typeof source.viewport === "object"),
+        viewport_source: source.viewport_source ? String(source.viewport_source) : null,
+        coord: source.coord && typeof source.coord === "object" ? source.coord : null,
         primitives: layers.map(function(layerSpec) { return layerSpec.type; }).filter(function(value, idx, arr) {
           return arr.indexOf(value) === idx;
         }),
@@ -820,8 +1454,15 @@ HTMLWidgets.widget({
         path_count: pathCount,
         raster_cell_count: rasterCellCount,
         vector_count: vectorCount,
+        rect_count: rectCount,
+        ribbon_count: ribbonCount,
+        ribbon_vertex_count: ribbonVertexCount,
+        ribbon_triangle_count: ribbonTriangleCount,
+        text_count: textCount,
         mesh_vertex_count: meshVertexCount,
         mesh_triangle_count: meshTriangleCount,
+        surface_vertex_count: surfaceVertexCount,
+        surface_triangle_count: surfaceTriangleCount,
         layers: layers
       };
     }
@@ -837,12 +1478,17 @@ HTMLWidgets.widget({
         panel_id: render.panel !== undefined ? render.panel : 1,
         row: 1,
         col: 1,
+        scale_x: 1,
+        scale_y: 1,
         label: null,
         bounds: null,
         viewport: {
           x: normaliseAxisRange(render.viewport && render.viewport.x, [0, 1]),
           y: normaliseAxisRange(render.viewport && render.viewport.y, [0, 1])
         },
+        viewport_explicit: !!(render.viewport && typeof render.viewport === "object"),
+        viewport_source: render.viewport_source ? String(render.viewport_source) : null,
+        coord: render.coord && typeof render.coord === "object" ? render.coord : null,
         primitives: layers.map(function(layerSpec) { return layerSpec.type; }).filter(function(value, idx, arr) {
           return arr.indexOf(value) === idx;
         }),
@@ -851,8 +1497,15 @@ HTMLWidgets.widget({
         path_count: layers.filter(function(layerSpec) { return layerSpec.type === "lines"; }).reduce(function(total, layerSpec) { return total + layerSpec.path_count; }, 0),
         raster_cell_count: layers.filter(function(layerSpec) { return layerSpec.type === "raster"; }).reduce(function(total, layerSpec) { return total + (layerSpec.width * layerSpec.height); }, 0),
         vector_count: layers.filter(function(layerSpec) { return layerSpec.type === "vectors"; }).reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0),
+        rect_count: layers.filter(function(layerSpec) { return layerSpec.type === "rects"; }).reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0),
+        ribbon_count: layers.filter(function(layerSpec) { return layerSpec.type === "ribbons"; }).reduce(function(total, layerSpec) { return total + layerSpec.strip_count; }, 0),
+        ribbon_vertex_count: layers.filter(function(layerSpec) { return layerSpec.type === "ribbons"; }).reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0),
+        ribbon_triangle_count: layers.filter(function(layerSpec) { return layerSpec.type === "ribbons"; }).reduce(function(total, layerSpec) { return total + layerSpec.triangle_count; }, 0),
+        text_count: layers.filter(function(layerSpec) { return layerSpec.type === "text"; }).reduce(function(total, layerSpec) { return total + layerSpec.rows; }, 0),
         mesh_vertex_count: layers.filter(function(layerSpec) { return layerSpec.type === "mesh"; }).reduce(function(total, layerSpec) { return total + layerSpec.vertex_count; }, 0),
         mesh_triangle_count: layers.filter(function(layerSpec) { return layerSpec.type === "mesh"; }).reduce(function(total, layerSpec) { return total + layerSpec.triangle_count; }, 0),
+        surface_vertex_count: layers.filter(function(layerSpec) { return layerSpec.type === "surface"; }).reduce(function(total, layerSpec) { return total + layerSpec.vertex_count; }, 0),
+        surface_triangle_count: layers.filter(function(layerSpec) { return layerSpec.type === "surface"; }).reduce(function(total, layerSpec) { return total + layerSpec.triangle_count; }, 0),
         layers: layers
       }];
     }
@@ -890,8 +1543,15 @@ HTMLWidgets.widget({
       var pathCount = panels.reduce(function(total, panel) { return total + panel.path_count; }, 0);
       var rasterCellCount = panels.reduce(function(total, panel) { return total + panel.raster_cell_count; }, 0);
       var vectorCount = panels.reduce(function(total, panel) { return total + (panel.vector_count || 0); }, 0);
+      var rectCount = panels.reduce(function(total, panel) { return total + (panel.rect_count || 0); }, 0);
+      var ribbonCount = panels.reduce(function(total, panel) { return total + (panel.ribbon_count || 0); }, 0);
+      var ribbonVertexCount = panels.reduce(function(total, panel) { return total + (panel.ribbon_vertex_count || 0); }, 0);
+      var ribbonTriangleCount = panels.reduce(function(total, panel) { return total + (panel.ribbon_triangle_count || 0); }, 0);
+      var textCount = panels.reduce(function(total, panel) { return total + (panel.text_count || 0); }, 0);
       var meshVertexCount = panels.reduce(function(total, panel) { return total + (panel.mesh_vertex_count || 0); }, 0);
       var meshTriangleCount = panels.reduce(function(total, panel) { return total + (panel.mesh_triangle_count || 0); }, 0);
+      var surfaceVertexCount = panels.reduce(function(total, panel) { return total + (panel.surface_vertex_count || 0); }, 0);
+      var surfaceTriangleCount = panels.reduce(function(total, panel) { return total + (panel.surface_triangle_count || 0); }, 0);
       var primitives = panels.reduce(function(values, panel) {
         panel.primitives.forEach(function(primitive) {
           if (values.indexOf(primitive) === -1) {
@@ -905,6 +1565,8 @@ HTMLWidgets.widget({
       return {
         mode: mode,
         grid: grid,
+        coord: source.coord && typeof source.coord === "object" ? source.coord : null,
+        scales: source.scales && typeof source.scales === "object" ? source.scales : null,
         panels: panels,
         primitives: primitives,
         point_count: pointCount,
@@ -912,11 +1574,21 @@ HTMLWidgets.widget({
         path_count: pathCount,
         raster_cell_count: rasterCellCount,
         vector_count: vectorCount,
+        rect_count: rectCount,
+        ribbon_count: ribbonCount,
+        ribbon_vertex_count: ribbonVertexCount,
+        ribbon_triangle_count: ribbonTriangleCount,
+        text_count: textCount,
         mesh_vertex_count: meshVertexCount,
         mesh_triangle_count: meshTriangleCount,
+        surface_vertex_count: surfaceVertexCount,
+        surface_triangle_count: surfaceTriangleCount,
         dimension: String(source.dimension || "2d").toLowerCase() === "3d" ? "3d" : "2d",
         camera: source.camera && typeof source.camera === "object" ? source.camera : null,
         selection: source.selection && typeof source.selection === "object" ? normalizeSelection(source.selection, []) : null,
+        interactions: source.interactions && typeof source.interactions === "object"
+          ? normalizeInteractionsSpec(source.interactions, [], source.selection, source.camera)
+          : null,
         timeline: normalizeTimeline(source.timeline),
         links: source.links && typeof source.links === "object" ? source.links : {},
         unsupported_layers: Array.isArray(source.unsupported_layers) ? source.unsupported_layers : [],
@@ -948,7 +1620,13 @@ HTMLWidgets.widget({
         state: normalized.webgl.view.state
       };
       normalized.render.selection = normalized.render.selection || normalized.webgl.selection || { mode: "none", highlight: true, emit: true };
+      normalized.render.interactions = normalized.render.interactions ||
+        normalized.webgl.interactions_spec ||
+        normalizeInteractionsSpec(null, normalized.webgl.interactions, normalized.render.selection, normalized.webgl.view);
       normalized.render.timeline = normalized.render.timeline || normalized.webgl.timeline || null;
+      if (window.ggWebGLScene && typeof window.ggWebGLScene.finalizeScene === "function") {
+        normalized = window.ggWebGLScene.finalizeScene(normalized);
+      }
 
       return normalized;
     }
@@ -1051,10 +1729,10 @@ HTMLWidgets.widget({
       ].join("");
 
       root.appendChild(header);
+      root.appendChild(timeline);
       root.appendChild(stage);
       root.appendChild(selectionControls);
       root.appendChild(selectionStatus);
-      root.appendChild(timeline);
       root.appendChild(axes);
       root.appendChild(notes);
       el.appendChild(root);
@@ -1084,7 +1762,15 @@ HTMLWidgets.widget({
     }
 
     function interactionList(x) {
-      return x && x.webgl ? x.webgl.interactions : [];
+      var values = x && x.webgl ? normalizeStringArray(x.webgl.interactions) : [];
+      var renderInteractions = x && x.render && x.render.interactions ? x.render.interactions : null;
+      var modes = renderInteractions && Array.isArray(renderInteractions.modes) ? renderInteractions.modes : [];
+      modes.forEach(function(mode) {
+        if (values.indexOf(mode) === -1) {
+          values.push(mode);
+        }
+      });
+      return values;
     }
 
     function renderingMode(x) {
@@ -1115,7 +1801,12 @@ HTMLWidgets.widget({
       }
 
       return boxes.length > 1 || boxes.some(function(box) {
-        return !!(box.panel && box.panel.label);
+        return !!(box.panel && (
+          box.panel.label ||
+          (Array.isArray(box.panel.layers) && box.panel.layers.some(function(layer) {
+            return layer && layer.type === "text" && layer.rows > 0;
+          }))
+        ));
       });
     }
 
@@ -1124,68 +1815,347 @@ HTMLWidgets.widget({
     }
 
     function sceneDimension(x) {
-      return x && x.render && x.render.dimension === "3d" ? "3d" : "2d";
+      return x && x.render && (x.render.dimension === "3d" || x.render.coordinate_system === "cartesian3d") ? "3d" : "2d";
+    }
+
+    function sceneProjection(x) {
+      return x && x.webgl && x.webgl.projection === "perspective" ? "perspective" : "orthographic";
+    }
+
+    function depthTestEnabled(x) {
+      return sceneDimension(x) === "3d" && x && x.webgl && x.webgl.depth_test !== false;
+    }
+
+    function blendMode(x) {
+      var mode = x && x.webgl ? String(x.webgl.blend_mode || "auto").toLowerCase() : "auto";
+      return ["auto", "alpha", "additive", "premultiplied"].indexOf(mode) === -1 ? "auto" : mode;
     }
 
     function sceneTimeline(x) {
-      return x && x.render ? x.render.timeline : null;
+      return x && x.render ? (x.render.timeline || (x.webgl && x.webgl.timeline) || null) : null;
+    }
+
+    function uniqueSortedTimelineValues(values, source) {
+      var seen = {};
+      return normalizeNumberArray(values)
+        .map(function(value) { return source === "frame" ? Math.round(value) : value; })
+        .filter(function(value) {
+          var key = source === "frame" ? String(Math.round(value)) : String(value);
+          if (seen[key]) {
+            return false;
+          }
+          seen[key] = true;
+          return true;
+        })
+        .sort(function(a, b) { return a - b; });
+    }
+
+    function createTimelineState(spec, previous) {
+      var source = spec && typeof spec === "object" ? spec : {};
+      var timeline = sceneTimeline(source);
+      if (!timeline) {
+        return {
+          values: [],
+          value: null,
+          index: 0,
+          source: "frame",
+          filter: "exact",
+          playing: false,
+          speed: 1,
+          loop: false,
+          fps: null,
+          enabled: false,
+          controls: false,
+          lastTick: null
+        };
+      }
+      var sourceName = String(timeline.source || (timeline.time && timeline.time.length ? "time" : "frame")).toLowerCase();
+      if (["frame", "time"].indexOf(sourceName) === -1) {
+        sourceName = timeline.time && timeline.time.length ? "time" : "frame";
+      }
+      var values = uniqueSortedTimelineValues(
+        timeline.values && timeline.values.length
+          ? timeline.values
+          : (sourceName === "time" ? timeline.time : timeline.frames),
+        sourceName
+      );
+      var filter = String(timeline.mode || timeline.filter || "exact").toLowerCase() === "cumulative" ? "cumulative" : "exact";
+      var speed = isFinite(Number(timeline.speed)) ? Math.max(0.05, Number(timeline.speed)) : 1;
+      var fps = isFinite(Number(timeline.fps)) ? Math.max(0.05, Number(timeline.fps)) : null;
+      var previousValue = previous && previous.enabled ? previous.value : null;
+      var index = findTimelineIndex(values, previousValue, sourceName);
+      if (index < 0) {
+        index = 0;
+      }
+      return {
+        values: values,
+        value: values.length ? values[index] : null,
+        index: index,
+        source: sourceName,
+        filter: filter,
+        playing: values.length > 1 && timeline.autoplay === true,
+        speed: speed,
+        loop: timeline.loop === true,
+        fps: fps,
+        enabled: values.length > 0,
+        controls: timeline.controls !== false && values.length > 1,
+        lastTick: null
+      };
+    }
+
+    function findTimelineIndex(values, value, source) {
+      if (!Array.isArray(values) || !values.length || value === null || value === undefined) {
+        return -1;
+      }
+      var target = Number(value);
+      if (!isFinite(target)) {
+        return -1;
+      }
+      for (var i = 0; i < values.length; i += 1) {
+        if (source === "frame") {
+          if (Math.round(Number(values[i])) === Math.round(target)) {
+            return i;
+          }
+        } else if (Math.abs(Number(values[i]) - target) < 1e-9) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    function setTimelineIndex(timeline, index) {
+      if (!timeline || !timeline.enabled || !timeline.values.length) {
+        return null;
+      }
+      var nextIndex = Math.max(0, Math.min(timeline.values.length - 1, Math.floor(Number(index)) || 0));
+      timeline.index = nextIndex;
+      timeline.value = timeline.values[nextIndex];
+      return timeline.value;
+    }
+
+    function setTimelineValue(timeline, value) {
+      if (!timeline || !timeline.enabled) {
+        return null;
+      }
+      var idx = findTimelineIndex(timeline.values, value, timeline.source);
+      if (idx < 0) {
+        idx = 0;
+      }
+      return setTimelineIndex(timeline, idx);
     }
 
     function currentTimelineFrame(x) {
-      var timeline = sceneTimeline(x);
-      if (!timeline) {
+      return state.timeline && state.timeline.enabled ? state.timeline.value : null;
+    }
+
+    function buildTimelinePayload(timeline, reason) {
+      if (!timeline || !timeline.enabled) {
         return null;
       }
-      if (state.timeline.frame !== null && state.timeline.frame !== undefined) {
-        return state.timeline.frame;
+
+      var payload = {
+        value: timeline.value,
+        index: Number(timeline.index || 0) + 1,
+        playing: timeline.playing === true,
+        speed: isFinite(Number(timeline.speed)) ? Number(timeline.speed) : 1,
+        loop: timeline.loop === true,
+        source: timeline.source === "time" ? "time" : "frame",
+        filter: timeline.filter === "cumulative" ? "cumulative" : "exact"
+      };
+
+      if (reason) {
+        payload.reason = String(reason);
       }
-      if (timeline.frames && timeline.frames.length) {
-        return timeline.frames[0];
+
+      return payload;
+    }
+
+    function shinyEventsEnabled() {
+      var interactions = state.x && state.x.render ? state.x.render.interactions : null;
+      return !(interactions && interactions.shiny === false);
+    }
+
+    function emitShinyEvent(suffix, payload) {
+      if (!el || !el.id || !shinyEventsEnabled()) {
+        return;
       }
-      if (timeline.time && timeline.time.length) {
-        return timeline.time[0];
+      if (!(window.Shiny && typeof window.Shiny.setInputValue === "function")) {
+        return;
       }
-      return null;
+      window.Shiny.setInputValue(el.id + suffix, payload, { priority: "event" });
+    }
+
+    function emitTimelineState(el, state, reason) {
+      if (!el || !el.id || !state || !state.timeline || !state.timeline.enabled) {
+        return;
+      }
+      if (!shinyEventsEnabled() || !(window.Shiny && typeof window.Shiny.setInputValue === "function")) {
+        return;
+      }
+
+      var payload = buildTimelinePayload(state.timeline, reason);
+      if (!payload) {
+        return;
+      }
+
+      window.Shiny.setInputValue(el.id + "_timeline", payload, { priority: "event" });
+      window.Shiny.setInputValue(el.id + "_time", payload, { priority: "event" });
+    }
+
+    function applyTimelineUpdate(message) {
+      if (!state.timeline || !state.timeline.enabled) {
+        return;
+      }
+
+      var changed = false;
+      var incoming = message && typeof message === "object" ? message : {};
+
+      if (incoming.index !== undefined && incoming.index !== null) {
+        setTimelineIndex(state.timeline, Number(incoming.index) - 1);
+        changed = true;
+      } else if (incoming.value !== undefined && incoming.value !== null) {
+        setTimelineValue(state.timeline, incoming.value);
+        changed = true;
+      }
+
+      if (incoming.speed !== undefined && incoming.speed !== null) {
+        var nextSpeed = Number(incoming.speed);
+        if (isFinite(nextSpeed) && nextSpeed > 0) {
+          state.timeline.speed = Math.max(0.05, nextSpeed);
+          changed = true;
+        }
+      }
+
+      if (incoming.loop !== undefined && incoming.loop !== null) {
+        state.timeline.loop = incoming.loop === true;
+        changed = true;
+      }
+
+      if (incoming.playing !== undefined && incoming.playing !== null) {
+        state.timeline.playing = incoming.playing === true;
+        state.timeline.lastTick = null;
+        changed = true;
+      }
+
+      if (!changed) {
+        return;
+      }
+
+      redrawCurrent();
+      emitTimelineState(el, state, "update");
+      if (state.timeline.playing) {
+        scheduleTimelineTick();
+      }
+    }
+
+    function registerShinyTimelineHandler() {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      var registry = window.ggWebGLTimelineRegistry || { instances: {}, handlerRegistered: false };
+      registry.instances = registry.instances || {};
+      if (el.id) {
+        registry.instances[el.id] = {
+          updateTimeline: applyTimelineUpdate
+        };
+      }
+      window.ggWebGLTimelineRegistry = registry;
+
+      if (registry.handlerRegistered || !(window.Shiny && typeof window.Shiny.addCustomMessageHandler === "function")) {
+        return;
+      }
+
+      window.Shiny.addCustomMessageHandler(TIMELINE_UPDATE_MESSAGE_TYPE, function(message) {
+        var incoming = message && typeof message === "object" ? message : {};
+        var id = incoming.id || incoming.outputId;
+        var currentRegistry = window.ggWebGLTimelineRegistry;
+        var instance = id && currentRegistry && currentRegistry.instances ? currentRegistry.instances[id] : null;
+        if (instance && typeof instance.updateTimeline === "function") {
+          instance.updateTimeline(incoming);
+        }
+      });
+      registry.handlerRegistered = true;
+    }
+
+    function layerHasTimelineValues(layer, timeline) {
+      if (!timeline || !timeline.enabled || !layer) {
+        return false;
+      }
+      if (timeline.source === "time") {
+        return (Array.isArray(layer.time) && layer.time.length) || (Array.isArray(layer.frame) && layer.frame.length);
+      }
+      return (Array.isArray(layer.frame) && layer.frame.length) || (Array.isArray(layer.time) && layer.time.length);
+    }
+
+    function getTimelineValue(layer, rowOrVertexIndex, timeline) {
+      if (!timeline || !timeline.enabled || !layer) {
+        return null;
+      }
+      var preferred = timeline.source === "time" ? layer.time : layer.frame;
+      var fallback = timeline.source === "time" ? layer.frame : layer.time;
+      var value;
+      if (Array.isArray(preferred) && rowOrVertexIndex < preferred.length) {
+        value = Number(preferred[rowOrVertexIndex]);
+      } else if (Array.isArray(fallback) && rowOrVertexIndex < fallback.length) {
+        value = Number(fallback[rowOrVertexIndex]);
+      } else {
+        return null;
+      }
+      if (!isFinite(value)) {
+        return null;
+      }
+      return timeline.source === "frame" ? Math.round(value) : value;
+    }
+
+    function isTimelineVisible(value, timeline) {
+      if (!timeline || !timeline.enabled || value === null || value === undefined) {
+        return true;
+      }
+      var current = Number(timeline.value);
+      var candidate = Number(value);
+      if (!isFinite(current) || !isFinite(candidate)) {
+        return true;
+      }
+      if (timeline.filter === "cumulative") {
+        return timeline.source === "frame"
+          ? Math.round(candidate) <= Math.round(current)
+          : candidate <= current + 1e-9;
+      }
+      return timeline.source === "frame"
+        ? Math.round(candidate) === Math.round(current)
+        : Math.abs(candidate - current) < 1e-9;
     }
 
     function layerIndexVisible(layer, index, x) {
-      var frame = currentTimelineFrame(x);
-      var timeline = sceneTimeline(x);
-      var exact = timeline && timeline.filter === "exact";
-      if (frame === null || frame === undefined) {
+      var timeline = state.timeline;
+      if (!timeline || !timeline.enabled || !layerHasTimelineValues(layer, timeline)) {
         return true;
       }
-      if (Array.isArray(layer.frame) && layer.frame.length) {
-        return exact
-          ? Math.round(Number(layer.frame[index])) === Math.round(Number(frame))
-          : Math.round(Number(layer.frame[index])) <= Math.round(Number(frame));
-      }
-      if (Array.isArray(layer.time) && layer.time.length) {
-        return exact
-          ? Math.abs(Number(layer.time[index]) - Number(frame)) < 1e-9
-          : Number(layer.time[index]) <= Number(frame);
-      }
-      return true;
+      var value = getTimelineValue(layer, index, timeline);
+      return value === null ? false : isTimelineVisible(value, timeline);
     }
 
     function pathIndexVisible(path, index, x) {
-      var frame = currentTimelineFrame(x);
-      var timeline = sceneTimeline(x);
-      var exact = timeline && timeline.filter === "exact";
-      if (frame === null || frame === undefined) {
+      var timeline = state.timeline;
+      if (!timeline || !timeline.enabled || !layerHasTimelineValues(path, timeline)) {
         return true;
       }
-      if (Array.isArray(path.frame) && path.frame.length) {
-        return exact
-          ? Math.round(Number(path.frame[index])) === Math.round(Number(frame))
-          : Math.round(Number(path.frame[index])) <= Math.round(Number(frame));
+      var value = getTimelineValue(path, index, timeline);
+      return value === null ? false : isTimelineVisible(value, timeline);
+    }
+
+    function pathSegmentVisible(path, i0, i1, x) {
+      var timeline = state.timeline;
+      if (!timeline || !timeline.enabled || !layerHasTimelineValues(path, timeline)) {
+        return true;
       }
-      if (Array.isArray(path.time) && path.time.length) {
-        return exact
-          ? Math.abs(Number(path.time[index]) - Number(frame)) < 1e-9
-          : Number(path.time[index]) <= Number(frame);
+      var v0 = getTimelineValue(path, i0, timeline);
+      var v1 = getTimelineValue(path, i1, timeline);
+      if (v0 === null || v1 === null) {
+        return false;
       }
-      return true;
+      return isTimelineVisible(v0, timeline) && isTimelineVisible(v1, timeline);
     }
 
     function normaliseAxisRange(range, fallback) {
@@ -1288,8 +2258,21 @@ HTMLWidgets.widget({
 	  if (state.baseDomains[id]) {
 		return cloneViewport(state.baseDomains[id]);
 	  }
-	  var bounds = supportedLayerBounds(panel);
 	  var viewport;
+
+	  var viewportSource = panel && panel.viewport_source ? String(panel.viewport_source) : "";
+	  var usePanelViewport = panel && panel.viewport && panel.viewport_explicit !== false &&
+		(panel.coord || viewportSource === "ggplot2" || viewportSource === "explicit");
+	  if (usePanelViewport) {
+		viewport = {
+		  x: normaliseAxisRange(panel.viewport.x, [0, 1]),
+		  y: normaliseAxisRange(panel.viewport.y, [0, 1])
+		};
+		state.baseDomains[id] = cloneViewport(viewport);
+		return cloneViewport(viewport);
+	  }
+
+	  var bounds = supportedLayerBounds(panel);
 	
 	  if (bounds) {
 		var xr = normaliseAxisRange(bounds.x, [0, 1]);
@@ -1377,6 +2360,9 @@ HTMLWidgets.widget({
       state.camera.target = cameraState.target.slice();
       state.camera.rotation = cameraState.rotation.slice();
       state.camera.up = cameraState.up.slice();
+      state.camera.fov = cameraState.fov;
+      state.camera.near = cameraState.near;
+      state.camera.far = cameraState.far;
     }
 
     function cameraController(x) {
@@ -1414,7 +2400,7 @@ HTMLWidgets.widget({
       }
 
       if (sceneDimension(x) === "3d" || currentTimelineFrame(x) !== null) {
-        return "quad";
+        return sceneDimension(x) === "3d" ? "native" : "quad";
       }
 
       return requested === "auto" ? (total <= 100000 ? "quad" : "native") : requested;
@@ -1428,21 +2414,24 @@ HTMLWidgets.widget({
       return x && x.webgl ? x.webgl.line_cap : "round";
     }
 
-    function shaderModeForLayer(x, layerType) {
-      var shader = shaderName(x);
-
-      if (layerType === "points" && shader === "density_splat") {
-        return 1;
+    function shaderRegistryEntryForLayer(x, layer, layerType) {
+      if (window.ggWebGLProgramRegistry &&
+          typeof window.ggWebGLProgramRegistry.getShaderEntry === "function") {
+        return window.ggWebGLProgramRegistry.getShaderEntry(
+          x,
+          layer || { type: layerType },
+          layer && layer.material ? layer.material : null,
+          layerType
+        );
       }
+      return null;
+    }
 
-      if (layerType === "lines" && shader === "trajectory_age") {
-        return 2;
+    function shaderModeForLayer(x, layerType, layer) {
+      var entry = shaderRegistryEntryForLayer(x, layer, layerType);
+      if (entry && isFinite(Number(entry.mode))) {
+        return Number(entry.mode);
       }
-
-      if (layerType === "lines" && shader === "trajectory_age_glow") {
-        return 3;
-      }
-
       return 0;
     }
 
@@ -1476,9 +2465,25 @@ HTMLWidgets.widget({
     }
 
     function hoverHtml(target) {
+      var title = "Trajectory sample";
+      if (target.type === "point") {
+        title = "Point sample";
+      } else if (target.type === "vector") {
+        title = "Vector";
+      } else if (target.type === "raster_cell") {
+        title = "Raster cell";
+      } else if (target.type === "surface_vertex") {
+        title = "Surface vertex";
+      } else if (target.type === "surface_face") {
+        title = "Surface face";
+      } else if (target.type === "mesh_vertex") {
+        title = "Mesh vertex";
+      } else if (target.type === "mesh_face") {
+        title = "Mesh face";
+      }
       var lines = [
         "<div class='ggwebgl__tooltip-title'>" +
-          escapeHtml(target.type === "point" ? "Point sample" : (target.type === "mesh_vertex" ? "Mesh vertex" : "Trajectory sample")) +
+          escapeHtml(title) +
           "</div>"
       ];
 
@@ -1498,9 +2503,22 @@ HTMLWidgets.widget({
       if (target.id) {
         lines.push("<div><strong>id</strong>: " + escapeHtml(target.id) + "</div>");
       }
+      if (isFinite(target.index)) {
+        lines.push("<div><strong>index</strong>: " + escapeHtml(String(target.index)) + "</div>");
+      }
+      if (isFinite(target.face_index)) {
+        lines.push("<div><strong>face</strong>: " + escapeHtml(String(target.face_index)) + "</div>");
+      }
+      if (isFinite(target.cell_index)) {
+        lines.push("<div><strong>cell</strong>: " + escapeHtml(String(target.cell_index)) + "</div>");
+      }
 
       if (target.group) {
         lines.push("<div><strong>group</strong>: " + escapeHtml(target.group) + "</div>");
+      }
+
+      if (Array.isArray(target.rgba)) {
+        lines.push("<div><strong>rgba</strong>: " + escapeHtml(target.rgba.map(formatNumber).join(", ")) + "</div>");
       }
 
       if (target.type === "point") {
@@ -1512,6 +2530,96 @@ HTMLWidgets.widget({
       }
 
       return lines.join("");
+    }
+
+    function pickPayload(target, reason) {
+      if (window.ggWebGLInteractions && typeof window.ggWebGLInteractions.pickPayload === "function") {
+        return window.ggWebGLInteractions.pickPayload(target, reason);
+      }
+      if (!target) {
+        return null;
+      }
+      var payload = {};
+      Object.keys(target).forEach(function(key) {
+        var value = target[key];
+        if (value !== undefined && typeof value !== "function" && key !== "dist2") {
+          payload[key] = value;
+        }
+      });
+      payload.reason = reason || "pick";
+      return payload;
+    }
+
+    function hoverKey(target) {
+      if (window.ggWebGLInteractions && typeof window.ggWebGLInteractions.hoverKey === "function") {
+        return window.ggWebGLInteractions.hoverKey(target);
+      }
+      if (!target) {
+        return "none";
+      }
+      return [target.type || "unknown", target.panel_id || "", target.layer_index || "", target.index || "", target.id || ""].join(":");
+    }
+
+    function emitHover(target) {
+      var key = hoverKey(target);
+      if (key === state.hover.key) {
+        return;
+      }
+      state.hover.key = key;
+      el.ggwebglLastHover = target ? pickPayload(target, "hover") : null;
+      emitShinyEvent("_hover", el.ggwebglLastHover);
+    }
+
+    function emitClickSelection(target) {
+      var picked = pickPayload(target, "click");
+      if (!picked) {
+        return;
+      }
+      var payload = {
+        mode: "click",
+        panel_id: picked.panel_id,
+        region: null,
+        count: 1,
+        selections: [{
+          panel_id: picked.panel_id,
+          layer_index: picked.layer_index,
+          geom: picked.geom || picked.type,
+          type: picked.type,
+          count: 1,
+          indices: isFinite(picked.index) ? [picked.index] : [],
+          ids: picked.id ? [picked.id] : []
+        }],
+        picked: picked
+      };
+      state.selection.result = payload;
+      emitSelection(payload);
+      updateSelectionStatus();
+      redrawCurrent();
+    }
+
+    function currentCameraPayload(reason) {
+      return {
+        reason: reason || "camera",
+        controller: cameraController(state.x),
+        projection: sceneProjection(state.x),
+        yaw: state.camera.yaw,
+        pitch: state.camera.pitch,
+        distance: state.camera.distance,
+        target: state.camera.target.slice(),
+        rotation: state.camera.rotation.slice(),
+        up: state.camera.up.slice(),
+        fov: state.camera.fov,
+        near: state.camera.near,
+        far: state.camera.far
+      };
+    }
+
+    function emitCameraState(reason) {
+      if (!state.x || sceneDimension(state.x) !== "3d" || !hasInteraction(state.x, "camera")) {
+        return;
+      }
+      el.ggwebglLastCameraEvent = currentCameraPayload(reason);
+      emitShinyEvent("_camera", el.ggwebglLastCameraEvent);
     }
 
     function panelBoxes(x) {
@@ -1626,6 +2734,354 @@ HTMLWidgets.widget({
       };
     }
 
+    function encodeMeshPickId(index) {
+      var id = Math.max(0, Math.floor(Number(index)) || 0) + 1;
+      return [
+        ((id >> 16) & 255) / 255,
+        ((id >> 8) & 255) / 255,
+        (id & 255) / 255,
+        1
+      ];
+    }
+
+    function decodeMeshPickColor(pixel) {
+      if (!pixel || pixel.length < 3) {
+        return -1;
+      }
+      var id = (Number(pixel[0]) << 16) + (Number(pixel[1]) << 8) + Number(pixel[2]);
+      return id > 0 ? id - 1 : -1;
+    }
+
+    function createMeshPickingPayload(gl, layer, viewport) {
+      var vertexCount = Math.floor(Number(layer.vertex_count) || 0);
+      var xs = Array.isArray(layer.x) ? layer.x : [];
+      var ys = Array.isArray(layer.y) ? layer.y : [];
+      var zs = Array.isArray(layer.z) ? layer.z : [];
+      var indices = Array.isArray(layer.indices) ? layer.indices : [];
+      var zRange = meshZRange(layer);
+      var normalized = [];
+      var positions = [];
+      var colors = [];
+
+      for (var i = 0; i < vertexCount; i += 1) {
+        var p = normalizePosition3(xs[i], ys[i], zs[i] || 0, viewport, zRange);
+        normalized.push(p[0], p[1], p[2]);
+      }
+
+      for (var t = 0; t + 2 < indices.length; t += 3) {
+        var color = encodeMeshPickId(Math.floor(t / 3));
+        for (var corner = 0; corner < 3; corner += 1) {
+          var idx = Math.floor(Number(indices[t + corner])) || 0;
+          positions.push(
+            normalized[idx * 3],
+            normalized[idx * 3 + 1],
+            normalized[idx * 3 + 2]
+          );
+          colors.push(color[0], color[1], color[2], color[3]);
+        }
+      }
+
+      return {
+        count: Math.floor(positions.length / 3),
+        positionBuffer: createBuffer(gl, new Float32Array(positions)),
+        colorBuffer: createBuffer(gl, new Float32Array(colors))
+      };
+    }
+
+    function disposeMeshPickingPayload(gl, payload) {
+      if (!payload || !gl) {
+        return;
+      }
+      [payload.positionBuffer, payload.colorBuffer].forEach(function(buffer) {
+        if (buffer) {
+          gl.deleteBuffer(buffer);
+        }
+      });
+    }
+
+    function pickMeshFaceWithObjectIdPass(layer, px, py, viewport, box) {
+      var gl = state.gl;
+      var canvas = state.canvas;
+      if (!gl || !canvas || !box || !box.plotWidth || !box.plotHeight) {
+        return -1;
+      }
+      var programs = ensurePrograms(gl);
+      var pick = programs.meshPick;
+      if (!pick || !pick.program) {
+        return -1;
+      }
+
+      var stageRect = getStageRect();
+      var scaleX = canvas.width / Math.max(1, stageRect.width);
+      var scaleY = canvas.height / Math.max(1, stageRect.height);
+      var width = Math.max(1, canvas.width);
+      var height = Math.max(1, canvas.height);
+      var framebuffer = gl.createFramebuffer();
+      var texture = gl.createTexture();
+      var depth = gl.createRenderbuffer();
+      var payload = null;
+      var pixel = new Uint8Array(4);
+      var faceIndex = -1;
+
+      try {
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+        gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+          return -1;
+        }
+
+        var vx = Math.round(box.plotLeft * scaleX);
+        var vy = Math.round((stageRect.height - box.plotBottom) * scaleY);
+        var vw = Math.max(1, Math.round(box.plotWidth * scaleX));
+        var vh = Math.max(1, Math.round(box.plotHeight * scaleY));
+        gl.viewport(vx, vy, vw, vh);
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(vx, vy, vw, vh);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clearDepth(1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+
+        payload = createMeshPickingPayload(gl, layer, viewport);
+        if (!payload || payload.count < 3) {
+          return -1;
+        }
+        gl.useProgram(pick.program);
+        gl.uniformMatrix4fv(pick.uniforms.viewProjection, false, new Float32Array(cameraViewProjectionMatrix(state.x, box)));
+        bindAttributeBuffer(gl, pick.attributes.position3, payload.positionBuffer, 3);
+        bindAttributeBuffer(gl, pick.attributes.pickColor, payload.colorBuffer, 4);
+        gl.drawArrays(gl.TRIANGLES, 0, payload.count);
+
+        var readX = Math.max(0, Math.min(width - 1, Math.round((box.plotLeft + px) * scaleX)));
+        var readY = Math.max(0, Math.min(height - 1, Math.round(height - ((box.plotTop + py) * scaleY))));
+        gl.readPixels(readX, readY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        faceIndex = decodeMeshPickColor(pixel);
+      } catch (err) {
+        faceIndex = -1;
+      } finally {
+        disposeMeshPickingPayload(gl, payload);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+        if (texture) {
+          gl.deleteTexture(texture);
+        }
+        if (depth) {
+          gl.deleteRenderbuffer(depth);
+        }
+        if (framebuffer) {
+          gl.deleteFramebuffer(framebuffer);
+        }
+      }
+
+      return faceIndex;
+    }
+
+    function meshVertexScreenPoint(layer, vertexIndex, viewport, box) {
+      var xs = layer.x || [];
+      var ys = layer.y || [];
+      var zs = layer.z || [];
+      var xSpan = Math.max(1e-6, viewport.x[1] - viewport.x[0]);
+      var ySpan = Math.max(1e-6, viewport.y[1] - viewport.y[0]);
+      var projected = sceneDimension(state.x) === "3d"
+        ? project3dPoint(xs[vertexIndex], ys[vertexIndex], zs[vertexIndex] || 0, viewport, layer)
+        : { x: Number(xs[vertexIndex]), y: Number(ys[vertexIndex]) };
+      return {
+        x: sceneDimension(state.x) === "3d"
+          ? ((projected.x + 1.2) / 2.4) * box.plotWidth
+          : ((projected.x - viewport.x[0]) / xSpan) * box.plotWidth,
+        y: sceneDimension(state.x) === "3d"
+          ? (1 - ((projected.y + 1.2) / 2.4)) * box.plotHeight
+          : (1 - ((projected.y - viewport.y[0]) / ySpan)) * box.plotHeight,
+        z: Number(zs[vertexIndex]) || 0,
+        dataX: Number(xs[vertexIndex]),
+        dataY: Number(ys[vertexIndex])
+      };
+    }
+
+    function pointInScreenTriangle(px, py, a, b, c) {
+      if (window.ggWebGLInteractions && typeof window.ggWebGLInteractions.pointInTriangle === "function") {
+        return window.ggWebGLInteractions.pointInTriangle(px, py, a, b, c);
+      }
+      var v0x = c.x - a.x;
+      var v0y = c.y - a.y;
+      var v1x = b.x - a.x;
+      var v1y = b.y - a.y;
+      var v2x = px - a.x;
+      var v2y = py - a.y;
+      var dot00 = v0x * v0x + v0y * v0y;
+      var dot01 = v0x * v1x + v0y * v1y;
+      var dot02 = v0x * v2x + v0y * v2y;
+      var dot11 = v1x * v1x + v1y * v1y;
+      var dot12 = v1x * v2x + v1y * v2y;
+      var denom = dot00 * dot11 - dot01 * dot01;
+      if (Math.abs(denom) < 1e-9) {
+        return false;
+      }
+      var inv = 1 / denom;
+      var u = (dot11 * dot02 - dot01 * dot12) * inv;
+      var v = (dot00 * dot12 - dot01 * dot02) * inv;
+      return u >= -0.001 && v >= -0.001 && (u + v) <= 1.001;
+    }
+
+    function distanceToSegmentSquared(px, py, ax, ay, bx, by) {
+      var dx = bx - ax;
+      var dy = by - ay;
+      var len2 = dx * dx + dy * dy;
+      if (len2 <= 1e-9) {
+        dx = px - ax;
+        dy = py - ay;
+        return dx * dx + dy * dy;
+      }
+      var t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+      var x = ax + t * dx;
+      var y = ay + t * dy;
+      dx = px - x;
+      dy = py - y;
+      return dx * dx + dy * dy;
+    }
+
+    function pickMeshFaceAt(layer, px, py, viewport, box) {
+      var indices = layer.indices || [];
+      var pickIds = layer.pick_id || [];
+      var best = null;
+      var pickedFace = pickMeshFaceWithObjectIdPass(layer, px, py, viewport, box);
+      if (pickedFace >= 0 && pickedFace * 3 + 2 < indices.length) {
+        var offset = pickedFace * 3;
+        var pa = meshVertexScreenPoint(layer, indices[offset], viewport, box);
+        var pb = meshVertexScreenPoint(layer, indices[offset + 1], viewport, box);
+        var pc = meshVertexScreenPoint(layer, indices[offset + 2], viewport, box);
+        return {
+          dist2: 0,
+          type: "mesh_face",
+          x: (pa.dataX + pb.dataX + pc.dataX) / 3,
+          y: (pa.dataY + pb.dataY + pc.dataY) / 3,
+          z: (pa.z + pb.z + pc.z) / 3,
+          id: pickIds[pickedFace] || String(pickedFace),
+          face_index: pickedFace
+        };
+      }
+      for (var t = 0; t + 2 < indices.length; t += 3) {
+        var ia = Number(indices[t]);
+        var ib = Number(indices[t + 1]);
+        var ic = Number(indices[t + 2]);
+        if (!isFinite(ia) || !isFinite(ib) || !isFinite(ic)) {
+          continue;
+        }
+        var a = meshVertexScreenPoint(layer, ia, viewport, box);
+        var b = meshVertexScreenPoint(layer, ib, viewport, box);
+        var c = meshVertexScreenPoint(layer, ic, viewport, box);
+        if (!pointInScreenTriangle(px, py, a, b, c)) {
+          continue;
+        }
+        var cx = (a.x + b.x + c.x) / 3;
+        var cy = (a.y + b.y + c.y) / 3;
+        var dist2 = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+        if (!best || dist2 < best.dist2) {
+          var faceIndex = Math.floor(t / 3);
+          best = {
+            dist2: dist2,
+            type: "mesh_face",
+            x: (a.dataX + b.dataX + c.dataX) / 3,
+            y: (a.dataY + b.dataY + c.dataY) / 3,
+            z: (a.z + b.z + c.z) / 3,
+            id: pickIds[faceIndex] || String(faceIndex),
+            face_index: faceIndex
+          };
+        }
+      }
+      return best;
+    }
+
+    function surfaceLayerCoordinateArrays(layer) {
+      if (layer._surfacePickCoords) {
+        return layer._surfacePickCoords;
+      }
+      var positions = layer.positions || [];
+      var xs = [];
+      var ys = [];
+      var zs = [];
+      var count = Math.floor(positions.length / 3);
+      for (var i = 0; i < count; i += 1) {
+        xs.push(Number(positions[i * 3]));
+        ys.push(Number(positions[i * 3 + 1]));
+        zs.push(Number(positions[i * 3 + 2]) || 0);
+      }
+      layer._surfacePickCoords = { x: xs, y: ys, z: zs };
+      return layer._surfacePickCoords;
+    }
+
+    function surfaceVertexScreenPoint(layer, vertexIndex, viewport, box) {
+      var coords = surfaceLayerCoordinateArrays(layer);
+      var x = coords.x[vertexIndex];
+      var y = coords.y[vertexIndex];
+      var z = coords.z[vertexIndex] || 0;
+      var xSpan = Math.max(1e-6, viewport.x[1] - viewport.x[0]);
+      var ySpan = Math.max(1e-6, viewport.y[1] - viewport.y[0]);
+      var projected = sceneDimension(state.x) === "3d"
+        ? project3dPoint(x, y, z, viewport, coords)
+        : { x: Number(x), y: Number(y) };
+      return {
+        x: sceneDimension(state.x) === "3d"
+          ? ((projected.x + 1.2) / 2.4) * box.plotWidth
+          : ((projected.x - viewport.x[0]) / xSpan) * box.plotWidth,
+        y: sceneDimension(state.x) === "3d"
+          ? (1 - ((projected.y + 1.2) / 2.4)) * box.plotHeight
+          : (1 - ((projected.y - viewport.y[0]) / ySpan)) * box.plotHeight,
+        z: z,
+        dataX: Number(x),
+        dataY: Number(y)
+      };
+    }
+
+    function pickSurfaceFaceAt(layer, px, py, viewport, box) {
+      var indices = layer.indices || [];
+      var pickIds = layer.pick_id || [];
+      var best = null;
+      for (var t = 0; t + 2 < indices.length; t += 3) {
+        var ia = Number(indices[t]);
+        var ib = Number(indices[t + 1]);
+        var ic = Number(indices[t + 2]);
+        if (!isFinite(ia) || !isFinite(ib) || !isFinite(ic)) {
+          continue;
+        }
+        var a = surfaceVertexScreenPoint(layer, ia, viewport, box);
+        var b = surfaceVertexScreenPoint(layer, ib, viewport, box);
+        var c = surfaceVertexScreenPoint(layer, ic, viewport, box);
+        if (!pointInScreenTriangle(px, py, a, b, c)) {
+          continue;
+        }
+        var cx = (a.x + b.x + c.x) / 3;
+        var cy = (a.y + b.y + c.y) / 3;
+        var dist2 = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+        if (!best || dist2 < best.dist2) {
+          var faceIndex = Math.floor(t / 3);
+          best = {
+            dist2: dist2,
+            type: "surface_face",
+            x: (a.dataX + b.dataX + c.dataX) / 3,
+            y: (a.dataY + b.dataY + c.dataY) / 3,
+            z: (a.z + b.z + c.z) / 3,
+            id: pickIds[faceIndex] || String(faceIndex),
+            face_index: faceIndex
+          };
+        }
+      }
+      return best;
+    }
+
     function pickSceneTarget(clientX, clientY, panel, box) {
       var layers = Array.isArray(panel.layers) ? panel.layers : [];
       var viewport = currentViewport(panel);
@@ -1638,7 +3094,7 @@ HTMLWidgets.widget({
       var ySpan = Math.max(1e-6, viewport.y[1] - viewport.y[0]);
       var best = null;
 
-      layers.forEach(function(layer) {
+      layers.forEach(function(layer, layerIndex) {
         if (layer.type === "points") {
           var count = layer.rows || 0;
           var xs = layer.x || [];
@@ -1659,10 +3115,16 @@ HTMLWidgets.widget({
               best = {
                 dist2: dist2,
                 type: "point",
+                panel_id: panel.panel_id,
+                layer_index: layerIndex,
+                geom: layer.geom || "points",
+                index: i,
                 x: xs[i],
                 y: ys[i],
+                z: layer.z && isFinite(layer.z[i]) ? layer.z[i] : NaN,
                 size: sizes[i] || 0,
                 age: isFinite(ages[i]) ? ages[i] : 1,
+                id: layer.id && layer.id[i] ? layer.id[i] : String(i),
                 label: labels[i] || "",
                 panelLabel: panel.label || ("Panel " + panel.panel_id)
               };
@@ -1693,8 +3155,13 @@ HTMLWidgets.widget({
                 best = {
                   dist2: dist2,
                   type: "line",
+                  panel_id: panel.panel_id,
+                  layer_index: layerIndex,
+                  geom: layer.geom || "lines",
+                  index: i,
                   x: xs[i],
                   y: ys[i],
+                  z: path.z && isFinite(path.z[i]) ? path.z[i] : NaN,
                   group: path.group || "",
                   age: isFinite(ages[i]) ? ages[i] : NaN,
                   panelLabel: panel.label || ("Panel " + panel.panel_id)
@@ -1702,21 +3169,87 @@ HTMLWidgets.widget({
               }
             }
           });
+        } else if (layer.type === "vectors") {
+          var vxs = layer.x || [];
+          var vys = layer.y || [];
+          var vxends = layer.xend || [];
+          var vyends = layer.yend || [];
+          var vids = layer.id || [];
+          for (var v = 0; v < layer.rows; v += 1) {
+            if (!layerIndexVisible(layer, v, state.x)) {
+              continue;
+            }
+            var ax = ((vxs[v] - viewport.x[0]) / xSpan) * box.plotWidth;
+            var ay = (1 - ((vys[v] - viewport.y[0]) / ySpan)) * box.plotHeight;
+            var bx = ((vxends[v] - viewport.x[0]) / xSpan) * box.plotWidth;
+            var by = (1 - ((vyends[v] - viewport.y[0]) / ySpan)) * box.plotHeight;
+            var vdist2 = distanceToSegmentSquared(px, py, ax, ay, bx, by);
+            if (vdist2 <= 144 && (!best || vdist2 < best.dist2)) {
+              best = {
+                dist2: vdist2,
+                type: "vector",
+                panel_id: panel.panel_id,
+                layer_index: layerIndex,
+                geom: layer.geom || "vectors",
+                index: v,
+                x: vxs[v],
+                y: vys[v],
+                z: layer.z && isFinite(layer.z[v]) ? layer.z[v] : NaN,
+                xend: vxends[v],
+                yend: vyends[v],
+                zend: layer.zend && isFinite(layer.zend[v]) ? layer.zend[v] : NaN,
+                id: vids[v] || String(v),
+                panelLabel: panel.label || ("Panel " + panel.panel_id)
+              };
+            }
+          }
+        } else if (layer.type === "raster") {
+          var rxmin = Number(layer.xmin);
+          var rxmax = Number(layer.xmax);
+          var rymin = Number(layer.ymin);
+          var rymax = Number(layer.ymax);
+          var dataPoint = stageToDataPoint(box.plotLeft + px, box.plotTop + py, panel, box);
+          if (dataPoint && dataPoint.x >= rxmin && dataPoint.x <= rxmax && dataPoint.y >= rymin && dataPoint.y <= rymax) {
+            var fx = (dataPoint.x - rxmin) / Math.max(1e-9, rxmax - rxmin);
+            var fy = (dataPoint.y - rymin) / Math.max(1e-9, rymax - rymin);
+            var col = Math.max(0, Math.min(layer.width - 1, Math.floor(fx * layer.width)));
+            var row = Math.max(0, Math.min(layer.height - 1, Math.floor((1 - fy) * layer.height)));
+            var cellIndex = row * layer.width + col;
+            var offset = cellIndex * 4;
+            best = {
+              dist2: 0,
+              type: "raster_cell",
+              panel_id: panel.panel_id,
+              layer_index: layerIndex,
+              geom: layer.geom || "raster",
+              index: cellIndex,
+              cell_index: cellIndex,
+              row: row,
+              col: col,
+              x: dataPoint.x,
+              y: dataPoint.y,
+              rgba: (layer.rgba || []).slice(offset, offset + 4),
+              panelLabel: panel.label || ("Panel " + panel.panel_id)
+            };
+          }
         } else if (layer.type === "mesh") {
           var mxs = layer.x || [];
           var mys = layer.y || [];
           var mzs = layer.z || [];
           var mids = layer.id || [];
+          var face = pickMeshFaceAt(layer, px, py, viewport, box);
+          if (face && (!best || face.dist2 < best.dist2)) {
+            best = Object.assign(face, {
+              panel_id: panel.panel_id,
+              layer_index: layerIndex,
+              geom: layer.geom || "mesh",
+              panelLabel: panel.label || ("Panel " + panel.panel_id)
+            });
+          }
           for (var m = 0; m < layer.vertex_count; m += 1) {
-            var projected = sceneDimension(state.x) === "3d"
-              ? project3dPoint(mxs[m], mys[m], mzs[m] || 0, viewport, layer)
-              : { x: Number(mxs[m]), y: Number(mys[m]) };
-            var msx = sceneDimension(state.x) === "3d"
-              ? ((projected.x + 1.2) / 2.4) * box.plotWidth
-              : ((projected.x - viewport.x[0]) / xSpan) * box.plotWidth;
-            var msy = sceneDimension(state.x) === "3d"
-              ? (1 - ((projected.y + 1.2) / 2.4)) * box.plotHeight
-              : (1 - ((projected.y - viewport.y[0]) / ySpan)) * box.plotHeight;
+            var vertex = meshVertexScreenPoint(layer, m, viewport, box);
+            var msx = vertex.x;
+            var msy = vertex.y;
             var mdx = px - msx;
             var mdy = py - msy;
             var mdist2 = mdx * mdx + mdy * mdy;
@@ -1724,10 +3257,45 @@ HTMLWidgets.widget({
               best = {
                 dist2: mdist2,
                 type: "mesh_vertex",
+                panel_id: panel.panel_id,
+                layer_index: layerIndex,
+                geom: layer.geom || "mesh",
+                index: m,
                 x: mxs[m],
                 y: mys[m],
                 z: mzs[m] || 0,
                 id: mids[m] || String(m),
+                panelLabel: panel.label || ("Panel " + panel.panel_id)
+              };
+            }
+          }
+        } else if (layer.type === "surface") {
+          var sface = pickSurfaceFaceAt(layer, px, py, viewport, box);
+          if (sface && (!best || sface.dist2 < best.dist2)) {
+            best = Object.assign(sface, {
+              panel_id: panel.panel_id,
+              layer_index: layerIndex,
+              geom: layer.geom || "surface",
+              panelLabel: panel.label || ("Panel " + panel.panel_id)
+            });
+          }
+          for (var s = 0; s < layer.vertex_count; s += 1) {
+            var svertex = surfaceVertexScreenPoint(layer, s, viewport, box);
+            var sdx = px - svertex.x;
+            var sdy = py - svertex.y;
+            var sdist2 = sdx * sdx + sdy * sdy;
+            if (sdist2 <= 100 && (!best || sdist2 < best.dist2)) {
+              best = {
+                dist2: sdist2,
+                type: "surface_vertex",
+                panel_id: panel.panel_id,
+                layer_index: layerIndex,
+                geom: layer.geom || "surface",
+                index: s,
+                x: svertex.dataX,
+                y: svertex.dataY,
+                z: svertex.z,
+                id: String(s),
                 panelLabel: panel.label || ("Panel " + panel.panel_id)
               };
             }
@@ -1740,13 +3308,17 @@ HTMLWidgets.widget({
 
     function emitSelection(payload) {
       payload = payload || {};
+      if (window.ggWebGLPicking && typeof window.ggWebGLPicking.decorateSelectionPayload === "function") {
+        payload = window.ggWebGLPicking.decorateSelectionPayload(payload);
+      }
       el.ggwebglLastSelection = payload;
       var selection = state.x && state.x.webgl ? state.x.webgl.selection : null;
       if (selection && selection.emit === false) {
         return;
       }
-      if (window.Shiny && typeof window.Shiny.setInputValue === "function" && el.id) {
-        window.Shiny.setInputValue(el.id + "_selection", payload, { priority: "event" });
+      emitShinyEvent("_selection", payload);
+      if (payload.mode === "brush") {
+        emitShinyEvent("_brush", payload);
       }
       if (state.x && state.x.webgl && state.x.webgl.extra && typeof state.x.webgl.extra.on_selection === "function") {
         state.x.webgl.extra.on_selection(payload);
@@ -1758,8 +3330,10 @@ HTMLWidgets.widget({
       for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
         var xi = polygon[i].x, yi = polygon[i].y;
         var xj = polygon[j].x, yj = polygon[j].y;
+        var dy = yj - yi;
         var intersect = ((yi > y) !== (yj > y)) &&
-          (x < (xj - xi) * (y - yi) / Math.max(1e-9, yj - yi) + xi);
+          Math.abs(dy) > 1e-9 &&
+          (x < (xj - xi) * (y - yi) / dy + xi);
         if (intersect) {
           inside = !inside;
         }
@@ -1904,12 +3478,20 @@ HTMLWidgets.widget({
       var enabled = state.x && !publicationMode(state.x) && activeSelectionMode(state.x);
       if (!enabled) {
         state.selectionStatus.textContent = "";
+        state.selectionStatus.style.display = "none";
+        if (state.root) {
+          state.root.classList.toggle("ggwebgl--selection-status-visible", false);
+        }
         return;
       }
       if (state.selection.result) {
         state.selectionStatus.textContent = selectedCount(state.selection.result.selections) + " selected";
       } else {
         state.selectionStatus.textContent = "Drag to select samples";
+      }
+      state.selectionStatus.style.display = "block";
+      if (state.root) {
+        state.root.classList.toggle("ggwebgl--selection-status-visible", true);
       }
     }
 
@@ -2067,6 +3649,7 @@ HTMLWidgets.widget({
     function refreshHover(clientX, clientY) {
       if (!state.x || !hasInteraction(state.x, "hover")) {
         hideTooltip();
+        emitHover(null);
         return;
       }
 
@@ -2077,6 +3660,7 @@ HTMLWidgets.widget({
 
       if (!box) {
         hideTooltip();
+        emitHover(null);
         return;
       }
 
@@ -2086,9 +3670,11 @@ HTMLWidgets.widget({
 
       if (!target) {
         hideTooltip();
+        emitHover(null);
         return;
       }
 
+      emitHover(target);
       showTooltip(hoverHtml(target), clientX, clientY);
     }
 
@@ -2150,6 +3736,9 @@ HTMLWidgets.widget({
       var publication = publicationMode(x);
       var showControls = !publication && modes.brush && modes.lasso;
       state.selectionControls.style.display = showControls ? "flex" : "none";
+      if (state.root) {
+        state.root.classList.toggle("ggwebgl--selection-controls-visible", showControls);
+      }
       Array.prototype.forEach.call(
         state.selectionControls.querySelectorAll(".ggwebgl__selection-mode"),
         function(button) {
@@ -2177,41 +3766,36 @@ HTMLWidgets.widget({
     }
 
     function timelineValues(x) {
-      var timeline = sceneTimeline(x);
-      if (!timeline) {
-        return [];
-      }
-      if (timeline.frames && timeline.frames.length) {
-        return timeline.frames.slice();
-      }
-      if (timeline.time && timeline.time.length) {
-        return timeline.time.slice();
-      }
-      return [];
+      return state.timeline && state.timeline.enabled ? state.timeline.values.slice() : [];
     }
 
     function updateTimelineUi(x) {
       if (!state.timelineControls) {
         return;
       }
-      var timeline = sceneTimeline(x);
       var values = timelineValues(x);
-      var visible = !!(timeline && timeline.controls && values.length > 1);
+      var visible = !!(state.timeline && state.timeline.controls && values.length > 1);
       el.ggwebglTimelineFrame = currentTimelineFrame(x);
       state.timelineControls.style.display = visible ? "flex" : "none";
+      if (state.root) {
+        state.root.classList.toggle("ggwebgl--timeline-visible", visible);
+      }
       if (!visible) {
         return;
       }
 
       var scrub = state.timelineControls.querySelector(".ggwebgl__timeline-scrub");
       var play = state.timelineControls.querySelector(".ggwebgl__timeline-play");
+      var speed = state.timelineControls.querySelector(".ggwebgl__timeline-speed");
       if (scrub) {
         scrub.max = String(values.length - 1);
-        var idx = values.indexOf(currentTimelineFrame(x));
-        scrub.value = String(Math.max(0, idx));
+        scrub.value = String(Math.max(0, state.timeline.index || 0));
       }
       if (play) {
         play.textContent = state.timeline.playing ? "Pause" : "Play";
+      }
+      if (speed) {
+        speed.value = String(state.timeline.speed || 1);
       }
     }
 
@@ -2227,33 +3811,40 @@ HTMLWidgets.widget({
 
       if (play) {
         play.addEventListener("click", function() {
+          if (!state.timeline.enabled) {
+            return;
+          }
           state.timeline.playing = !state.timeline.playing;
           state.timeline.lastTick = null;
           updateTimelineUi(state.x);
+          emitTimelineState(el, state, state.timeline.playing ? "play" : "pause");
           scheduleTimelineTick();
         });
       }
       if (scrub) {
         scrub.addEventListener("input", function() {
-          var values = timelineValues(state.x);
-          var idx = Math.max(0, Math.min(values.length - 1, Number(scrub.value) || 0));
-          state.timeline.frame = values[idx];
+          if (!state.timeline.enabled) {
+            return;
+          }
+          setTimelineIndex(state.timeline, Number(scrub.value) || 0);
           redrawCurrent();
+          emitTimelineState(el, state, "scrub");
         });
       }
       if (speed) {
         speed.addEventListener("change", function() {
-          if (state.x && state.x.render && state.x.render.timeline) {
-            state.x.render.timeline.speed = Math.max(0.05, Number(speed.value) || 1);
+          if (state.timeline) {
+            state.timeline.speed = Math.max(0.05, Number(speed.value) || 1);
+            emitTimelineState(el, state, "speed");
           }
         });
       }
       if (reset) {
         reset.addEventListener("click", function() {
-          var values = timelineValues(state.x);
-          state.timeline.frame = values.length ? values[0] : null;
+          setTimelineIndex(state.timeline, 0);
           state.timeline.playing = false;
           redrawCurrent();
+          emitTimelineState(el, state, "reset");
         });
       }
     }
@@ -2266,26 +3857,24 @@ HTMLWidgets.widget({
         if (!state.timeline.playing || !state.x) {
           return;
         }
-        var values = timelineValues(state.x);
-        if (values.length <= 1) {
+        if (!state.timeline.enabled || state.timeline.values.length <= 1) {
           state.timeline.playing = false;
           updateTimelineUi(state.x);
           return;
         }
-        var timeline = sceneTimeline(state.x);
-        var speed = timeline && timeline.speed ? timeline.speed : 1;
+        var speed = state.timeline.speed || 1;
         if (state.timeline.lastTick === null || timestamp - state.timeline.lastTick > (500 / speed)) {
-          var idx = values.indexOf(currentTimelineFrame(state.x));
-          idx = idx < 0 ? 0 : idx + 1;
-          if (idx >= values.length) {
-            idx = timeline && timeline.loop ? 0 : values.length - 1;
-            if (!(timeline && timeline.loop)) {
+          var idx = state.timeline.index + 1;
+          if (idx >= state.timeline.values.length) {
+            idx = state.timeline.loop ? 0 : state.timeline.values.length - 1;
+            if (!state.timeline.loop) {
               state.timeline.playing = false;
             }
           }
-          state.timeline.frame = values[idx];
+          setTimelineIndex(state.timeline, idx);
           state.timeline.lastTick = timestamp;
           redrawCurrent();
+          emitTimelineState(el, state, "tick");
         }
         scheduleTimelineTick();
       });
@@ -2299,6 +3888,8 @@ HTMLWidgets.widget({
       hideTooltip();
       updateLabels(state.x);
       updateTimelineUi(state.x);
+      updateSelectionStatus();
+      recalculateWidgetChromeLayout(state.x);
 
       try {
         drawScene(state.x);
@@ -2313,6 +3904,7 @@ HTMLWidgets.widget({
       state.drag.active = false;
       state.drag.panelId = null;
       state.drag.pointerId = null;
+      state.drag.moved = false;
       updateInteractionUi(state.x);
     }
 
@@ -2367,6 +3959,7 @@ HTMLWidgets.widget({
         state.drag.pointerId = event.pointerId;
         state.drag.lastClientX = event.clientX;
         state.drag.lastClientY = event.clientY;
+        state.drag.moved = false;
         hideTooltip();
 
         if (state.stage.setPointerCapture) {
@@ -2435,12 +4028,15 @@ HTMLWidgets.widget({
         if (!dx && !dy) {
           return;
         }
+        state.drag.moved = true;
 
         if (sceneDimension(state.x) === "3d") {
           if (event.shiftKey) {
             panCameraTarget(dx, dy, box);
+            emitCameraState("pan");
           } else if (cameraController(state.x) === "trackball") {
             applyTrackballDrag(dx, dy);
+            emitCameraState("trackball");
           } else {
             state.camera.yaw += dx * 0.01;
             state.camera.pitch = Math.max(-1.4, Math.min(1.4, state.camera.pitch + dy * 0.01));
@@ -2452,6 +4048,7 @@ HTMLWidgets.widget({
               rotation: state.camera.rotation.slice(),
               distance: state.camera.distance
             };
+            emitCameraState("orbit");
           }
           redrawCurrent();
           event.preventDefault();
@@ -2510,12 +4107,13 @@ HTMLWidgets.widget({
                 ? { mode: "lasso", polygon: polygon }
                 : { mode: "brush", rectangle: rectangle }
             };
-            state.selection.result = payload;
-            applyMagnifierRegion(panel.panel_id, region);
-            emitSelection(payload);
-            updateSelectionStatus();
-            redrawCurrent();
-          }
+          state.selection.result = payload;
+          applyMagnifierRegion(panel.panel_id, region);
+          emitSelection(payload);
+          updateSelectionStatus();
+          redrawCurrent();
+          state.suppressNextClick = true;
+        }
           state.selection.active = false;
           state.selection.pointerId = null;
           renderSelectionOverlay();
@@ -2523,6 +4121,9 @@ HTMLWidgets.widget({
           return;
         }
         if (event.pointerId === state.drag.pointerId) {
+          if (state.drag.moved) {
+            state.suppressNextClick = true;
+          }
           endDrag();
         }
       });
@@ -2547,6 +4148,27 @@ HTMLWidgets.widget({
 
       state.stage.addEventListener("pointerleave", function() {
         hideTooltip();
+        emitHover(null);
+      });
+
+      state.stage.addEventListener("click", function(event) {
+        if (!state.x || !hasInteraction(state.x, "click")) {
+          return;
+        }
+        if (state.suppressNextClick) {
+          state.suppressNextClick = false;
+          return;
+        }
+        var box = panelAtClient(event.clientX, event.clientY, state.x, true);
+        if (!box) {
+          return;
+        }
+        var target = pickSceneTarget(event.clientX, event.clientY, box.panel, box);
+        if (!target) {
+          return;
+        }
+        emitClickSelection(target);
+        event.preventDefault();
       });
 
       state.stage.addEventListener("wheel", function(event) {
@@ -2572,6 +4194,7 @@ HTMLWidgets.widget({
 
         if (sceneDimension(state.x) === "3d") {
           state.camera.distance = Math.max(0.2, Math.min(20, state.camera.distance * scale));
+          emitCameraState("zoom");
           redrawCurrent();
           event.preventDefault();
           return;
@@ -2608,6 +4231,7 @@ HTMLWidgets.widget({
 
         if (sceneDimension(state.x) === "3d") {
           initialiseCameraFromScene(state.x);
+          emitCameraState("reset");
         }
         resetViewport(box ? box.panel.panel_id : null);
         redrawCurrent();
@@ -2651,7 +4275,11 @@ HTMLWidgets.widget({
       }
 
       var primitiveProgram = createProgram(gl, primitiveVertexShaderSource, primitiveFragmentShaderSource);
+      var primitive3dProgram = createProgram(gl, primitive3dVertexShaderSource, primitiveFragmentShaderSource);
       var rasterProgram = createProgram(gl, rasterVertexShaderSource, rasterFragmentShaderSource);
+      var surfaceProgram = createProgram(gl, surfaceVertexShaderSource, surfaceFragmentShaderSource);
+      var meshProgram = createProgram(gl, meshVertexShaderSource, meshFragmentShaderSource);
+      var meshPickProgram = createProgram(gl, meshPickVertexShaderSource, meshPickFragmentShaderSource);
 
       state.programs = {
         primitive: {
@@ -2660,7 +4288,8 @@ HTMLWidgets.widget({
             position: gl.getAttribLocation(primitiveProgram, "a_position"),
             size: gl.getAttribLocation(primitiveProgram, "a_size"),
             color: gl.getAttribLocation(primitiveProgram, "a_color"),
-            age: gl.getAttribLocation(primitiveProgram, "a_age")
+            age: gl.getAttribLocation(primitiveProgram, "a_age"),
+            metric: gl.getAttribLocation(primitiveProgram, "a_metric")
 	          },
 	          uniforms: {
 	            domain: gl.getUniformLocation(primitiveProgram, "u_domain"),
@@ -2672,6 +4301,25 @@ HTMLWidgets.widget({
 	            densityAlphaCeiling: gl.getUniformLocation(primitiveProgram, "u_density_alpha_ceiling")
 	          }
         },
+        primitive3d: {
+          program: primitive3dProgram,
+          attributes: {
+            position3: gl.getAttribLocation(primitive3dProgram, "a_position3"),
+            size: gl.getAttribLocation(primitive3dProgram, "a_size"),
+            color: gl.getAttribLocation(primitive3dProgram, "a_color"),
+            age: gl.getAttribLocation(primitive3dProgram, "a_age"),
+            metric: gl.getAttribLocation(primitive3dProgram, "a_metric")
+          },
+          uniforms: {
+            viewProjection: gl.getUniformLocation(primitive3dProgram, "u_view_projection"),
+            pointScale: gl.getUniformLocation(primitive3dProgram, "u_point_scale"),
+            minPointSize: gl.getUniformLocation(primitive3dProgram, "u_min_point_size"),
+            shaderMode: gl.getUniformLocation(primitive3dProgram, "u_shader_mode"),
+            isPointLayer: gl.getUniformLocation(primitive3dProgram, "u_is_point_layer"),
+            densityAlphaBoost: gl.getUniformLocation(primitive3dProgram, "u_density_alpha_boost"),
+            densityAlphaCeiling: gl.getUniformLocation(primitive3dProgram, "u_density_alpha_ceiling")
+          }
+        },
         raster: {
           program: rasterProgram,
           attributes: {
@@ -2680,7 +4328,51 @@ HTMLWidgets.widget({
           },
           uniforms: {
             domain: gl.getUniformLocation(rasterProgram, "u_domain"),
-            texture: gl.getUniformLocation(rasterProgram, "u_texture")
+            texture: gl.getUniformLocation(rasterProgram, "u_texture"),
+            shaderMode: gl.getUniformLocation(rasterProgram, "u_shader_mode")
+          }
+        },
+        surface: {
+          program: surfaceProgram,
+          attributes: {
+            position3: gl.getAttribLocation(surfaceProgram, "a_position3"),
+            normal: gl.getAttribLocation(surfaceProgram, "a_normal"),
+            color: gl.getAttribLocation(surfaceProgram, "a_color"),
+            uncertainty: gl.getAttribLocation(surfaceProgram, "a_uncertainty")
+          },
+          uniforms: {
+            viewProjection: gl.getUniformLocation(surfaceProgram, "u_view_projection"),
+            shadingMode: gl.getUniformLocation(surfaceProgram, "u_shading_mode"),
+            lightDir: gl.getUniformLocation(surfaceProgram, "u_light_dir"),
+            zRange: gl.getUniformLocation(surfaceProgram, "u_z_range")
+          }
+        },
+        mesh: {
+          program: meshProgram,
+          attributes: {
+            position3: gl.getAttribLocation(meshProgram, "a_position3"),
+            normal: gl.getAttribLocation(meshProgram, "a_normal"),
+            color: gl.getAttribLocation(meshProgram, "a_color"),
+            scalar: gl.getAttribLocation(meshProgram, "a_scalar")
+          },
+          uniforms: {
+            viewProjection: gl.getUniformLocation(meshProgram, "u_view_projection"),
+            shadingMode: gl.getUniformLocation(meshProgram, "u_shading_mode"),
+            lightDir: gl.getUniformLocation(meshProgram, "u_light_dir"),
+            scalarRange: gl.getUniformLocation(meshProgram, "u_scalar_range"),
+            ambient: gl.getUniformLocation(meshProgram, "u_ambient"),
+            diffuse: gl.getUniformLocation(meshProgram, "u_diffuse"),
+            specular: gl.getUniformLocation(meshProgram, "u_specular")
+          }
+        },
+        meshPick: {
+          program: meshPickProgram,
+          attributes: {
+            position3: gl.getAttribLocation(meshPickProgram, "a_position3"),
+            pickColor: gl.getAttribLocation(meshPickProgram, "a_pick_color")
+          },
+          uniforms: {
+            viewProjection: gl.getUniformLocation(meshPickProgram, "u_view_projection")
           }
         }
       };
@@ -2745,6 +4437,13 @@ HTMLWidgets.widget({
       return buffer;
     }
 
+    function createElementBuffer(gl, values) {
+      var buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, values, gl.STATIC_DRAW);
+      return buffer;
+    }
+
     function deleteBufferIfPresent(buffer) {
       if (!buffer || !state.gl) {
         return;
@@ -2799,6 +4498,9 @@ HTMLWidgets.widget({
         (panel.layers || []).forEach(function(layer) {
           if (layer.type === "points") {
             disposePointLayerPayload(layer);
+          } else if (layer.type === "surface") {
+            disposeSurfaceLayerGpuPayload(state.gl, layer._surfaceGpuPayload);
+            delete layer._surfaceGpuPayload;
           }
         });
       });
@@ -2858,6 +4560,11 @@ HTMLWidgets.widget({
 		  for (var mi = 0; mi < mn; mi += 1) {
 			extend(mxs[mi], mys[mi]);
 		  }
+		} else if (layer.type === "surface") {
+		  var positions = layer.positions || [];
+		  for (var si = 0; si + 2 < positions.length; si += 3) {
+			extend(positions[si], positions[si + 1]);
+		  }
 		}
 	  });
 	
@@ -2883,6 +4590,19 @@ HTMLWidgets.widget({
       }
 
       return Math.max(0, Math.min(1, number));
+    }
+
+    function pointColorComponents(layer, rgba, index) {
+      if (layer && layer.compact_color && window.ggWebGLBuffers &&
+          typeof window.ggWebGLBuffers.colorAt === "function") {
+        return window.ggWebGLBuffers.colorAt(layer.compact_color, index);
+      }
+      return [
+        normalizeColorComponent(rgba[index * 4 + 0], 0.0),
+        normalizeColorComponent(rgba[index * 4 + 1], 0.0),
+        normalizeColorComponent(rgba[index * 4 + 2], 0.0),
+        normalizeColorComponent(rgba[index * 4 + 3], 1.0)
+      ];
     }
 
     function project3dPoint(xValue, yValue, zValue, viewport, layer) {
@@ -2924,8 +4644,155 @@ HTMLWidgets.widget({
       return { x: rx * scale, y: ry * scale, z: rz };
     }
 
-    function flattenPointLayer(layer, x, viewport) {
+    function layerZRange(zs) {
+      var zMin = Infinity;
+      var zMax = -Infinity;
+      zs = isArrayLike(zs) ? zs : [];
+      for (var i = 0; i < zs.length; i += 1) {
+        var value = Number(zs[i]);
+        if (isFinite(value)) {
+          zMin = Math.min(zMin, value);
+          zMax = Math.max(zMax, value);
+        }
+      }
+      if (!isFinite(zMin) || !isFinite(zMax)) {
+        zMin = -1;
+        zMax = 1;
+      }
+      if (zMin === zMax) {
+        zMin -= 0.5;
+        zMax += 0.5;
+      }
+      return [zMin, zMax];
+    }
+
+    function normalizePosition3(xValue, yValue, zValue, viewport, zRange) {
+      var xMid = (viewport.x[0] + viewport.x[1]) * 0.5;
+      var yMid = (viewport.y[0] + viewport.y[1]) * 0.5;
+      var zMid = (zRange[0] + zRange[1]) * 0.5;
+      var span = Math.max(
+        1e-6,
+        viewport.x[1] - viewport.x[0],
+        viewport.y[1] - viewport.y[0],
+        zRange[1] - zRange[0]
+      );
+      return [
+        (Number(xValue) - xMid) / span,
+        (Number(yValue) - yMid) / span,
+        (Number(zValue || 0) - zMid) / span
+      ];
+    }
+
+    function vectorLayerZRange(layer) {
+      var zMin = Infinity;
+      var zMax = -Infinity;
+
+      function scan(values) {
+        values = isArrayLike(values) ? values : [];
+        for (var i = 0; i < values.length; i += 1) {
+          var value = Number(values[i]);
+          if (isFinite(value)) {
+            zMin = Math.min(zMin, value);
+            zMax = Math.max(zMax, value);
+          }
+        }
+      }
+
+      scan(layer && layer.z);
+      scan(layer && layer.zend);
+
+      if (!isFinite(zMin) || !isFinite(zMax)) {
+        zMin = -1;
+        zMax = 1;
+      }
+      if (zMin === zMax) {
+        zMin -= 0.5;
+        zMax += 0.5;
+      }
+      return [zMin, zMax];
+    }
+
+    function projectVectorEndpoint3d(xValue, yValue, zValue, viewport, zRange, viewProjection) {
+      var point = normalizePosition3(xValue, yValue, zValue, viewport, zRange);
+      var mat4 = window.ggWebGLMat4;
+      var clip = mat4 && typeof mat4.transformPoint === "function"
+        ? mat4.transformPoint(viewProjection, [point[0], point[1], point[2], 1])
+        : [point[0], point[1], point[2], 1];
+      var w = Number(clip[3]);
+      if (!isFinite(w) || Math.abs(w) <= 1e-8) {
+        return { x: NaN, y: NaN, z: NaN };
+      }
+      return {
+        x: Number(clip[0]) / w,
+        y: Number(clip[1]) / w,
+        z: Number(clip[2]) / w
+      };
+    }
+
+    function cameraViewProjectionMatrix(x, box) {
+      var cameraModule = window.ggWebGLCamera;
+      if (!cameraModule || typeof cameraModule.cameraMatrices !== "function") {
+        return window.ggWebGLMat4 ? window.ggWebGLMat4.identity() : [
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1
+        ];
+      }
+      var camera = {
+        distance: state.camera.distance,
+        target: state.camera.target,
+        rotation: state.camera.rotation,
+        up: state.camera.up,
+        fov: state.camera.fov,
+        near: state.camera.near,
+        far: state.camera.far
+      };
+      var aspect = box && box.plotHeight ? Math.max(1e-6, box.plotWidth / box.plotHeight) : 1;
+      return cameraModule.cameraMatrices(camera, sceneProjection(x), aspect).viewProjection;
+    }
+
+    function flattenPointLayer3d(layer, x, viewport, start, end) {
       var n = layer.rows || 0;
+      var from = Math.max(0, Math.floor(Number(start) || 0));
+      var to = Math.min(n, end === undefined ? n : Math.max(from, Math.floor(Number(end) || n)));
+      var xs = layer.x || [];
+      var ys = layer.y || [];
+      var zs = layer.z || [];
+      var sizes = layer.size || [];
+      var ages = layer.age || [];
+      var rgba = layer.rgba || [];
+      var zRange = layerZRange(zs);
+      var positions = [];
+      var pointSizes = [];
+      var pointAges = [];
+      var colors = [];
+
+      for (var i = from; i < to; i += 1) {
+        if (x && !layerIndexVisible(layer, i, x)) {
+          continue;
+        }
+        var point = normalizePosition3(xs[i], ys[i], zs[i] || 0, viewport, zRange);
+        positions.push(point[0], point[1], point[2]);
+        pointSizes.push(isFinite(sizes[i]) ? Number(sizes[i]) : 1.0);
+        pointAges.push(isFinite(ages[i]) ? Number(ages[i]) : 1.0);
+        var color = pointColorComponents(layer, rgba, i);
+        colors.push(color[0], color[1], color[2], color[3]);
+      }
+
+      return {
+        count: pointSizes.length,
+        positions: new Float32Array(positions),
+        sizes: new Float32Array(pointSizes),
+        ages: new Float32Array(pointAges),
+        colors: new Float32Array(colors)
+      };
+    }
+
+    function flattenPointLayer(layer, x, viewport, start, end) {
+      var n = layer.rows || 0;
+      var from = Math.max(0, Math.floor(Number(start) || 0));
+      var to = Math.min(n, end === undefined ? n : Math.max(from, Math.floor(Number(end) || n)));
       var xs = layer.x || [];
       var ys = layer.y || [];
       var zs = layer.z || [];
@@ -2938,7 +4805,7 @@ HTMLWidgets.widget({
       var pointAges = [];
       var colors = [];
 
-      for (var i = 0; i < n; i += 1) {
+      for (var i = from; i < to; i += 1) {
         if (x && !layerIndexVisible(layer, i, x)) {
           continue;
         }
@@ -2947,12 +4814,8 @@ HTMLWidgets.widget({
         pointSizes.push(isFinite(sizes[i]) ? Number(sizes[i]) : 1.0);
         pointAges.push(isFinite(ages[i]) ? Number(ages[i]) : 1.0);
 
-        colors.push(
-          normalizeColorComponent(rgba[i * 4 + 0], 0.0),
-          normalizeColorComponent(rgba[i * 4 + 1], 0.0),
-          normalizeColorComponent(rgba[i * 4 + 2], 0.0),
-          normalizeColorComponent(rgba[i * 4 + 3], 1.0)
-        );
+        var color = pointColorComponents(layer, rgba, i);
+        colors.push(color[0], color[1], color[2], color[3]);
       }
 
       return {
@@ -2964,7 +4827,58 @@ HTMLWidgets.widget({
       };
     }
 
+    function pointLayerProgressiveEnabled(layer) {
+      return !!(layer && layer.transport && layer.transport.progressive === true &&
+        layer.transport.mode === "compact" && state && state.x && sceneDimension(state.x) !== "3d");
+    }
+
+    function pointLayerChunkSize(layer) {
+      var size = layer && layer.transport ? Math.floor(Number(layer.transport.chunk_size) || 0) : 0;
+      return Math.max(1, size || 100000);
+    }
+
+    function recordPointTransportMetrics(layer, metrics) {
+      metrics = metrics || {};
+      var current = el.__ggwebgl_transport_metrics || {};
+      var next = {
+        mode: metrics.mode || current.mode || (layer && layer.transport && layer.transport.mode) || "legacy",
+        rows: metrics.rows !== undefined ? metrics.rows : (current.rows || (layer && layer.rows) || 0),
+        uploaded: metrics.uploaded !== undefined ? metrics.uploaded : (current.uploaded || 0),
+        decoded_bytes: metrics.decoded_bytes !== undefined ? metrics.decoded_bytes :
+          (current.decoded_bytes || (layer && layer.compact && layer.compact.decoded_bytes) || null),
+        first_chunk_points: metrics.first_chunk_points !== undefined ? metrics.first_chunk_points : current.first_chunk_points,
+        full_upload_ms: metrics.full_upload_ms !== undefined ? metrics.full_upload_ms : current.full_upload_ms,
+        complete: metrics.complete !== undefined ? metrics.complete : !!current.complete
+      };
+      el.__ggwebgl_transport_metrics = next;
+      window.__ggwebgl_transport_metrics = next;
+    }
+
     function createPointLayerGpuPayload(gl, layer) {
+      if (pointLayerProgressiveEnabled(layer)) {
+        var lodLayer = window.ggWebGLLod && typeof window.ggWebGLLod.pointLodLayer === "function"
+          ? window.ggWebGLLod.pointLodLayer(layer)
+          : null;
+        var chunkSize = pointLayerChunkSize(layer);
+        var firstPayload = lodLayer
+          ? flattenPointLayer(lodLayer)
+          : flattenPointLayer(layer, null, null, 0, Math.min(layer.rows || 0, chunkSize));
+        var firstGpu = createPointLayerGpuPayloadFromFlat(gl, firstPayload);
+        firstGpu.progressive = true;
+        firstGpu.complete = false;
+        firstGpu.uploaded = firstPayload.count;
+        firstGpu.rows = layer.rows || 0;
+        recordPointTransportMetrics(layer, {
+          mode: "compact",
+          uploaded: firstPayload.count,
+          rows: layer.rows || 0,
+          first_chunk_points: firstPayload.count,
+          complete: false
+        });
+        schedulePointLayerFullUpload(gl, layer);
+        return firstGpu;
+      }
+
       var payload = flattenPointLayer(layer);
 
       return {
@@ -2984,15 +4898,63 @@ HTMLWidgets.widget({
         positionBuffer: payload.count ? createBuffer(gl, payload.positions) : null,
         sizeBuffer: payload.count ? createBuffer(gl, payload.sizes) : null,
         ageBuffer: payload.count ? createBuffer(gl, payload.ages) : null,
-        colorBuffer: payload.count ? createBuffer(gl, payload.colors) : null
+        colorBuffer: payload.count ? createBuffer(gl, payload.colors) : null,
+        complete: true,
+        rows: payload.count
       };
+    }
+
+    function schedulePointLayerFullUpload(gl, layer) {
+      if (!layer || layer._ggwebglPointUploadScheduled || layer._ggwebglPointUploadComplete) {
+        return;
+      }
+      layer._ggwebglPointUploadScheduled = true;
+      var started = (window.performance && performance.now) ? performance.now() : Date.now();
+      var run = function() {
+        if (!state.gl || state.gl !== gl || !state.x) {
+          layer._ggwebglPointUploadScheduled = false;
+          return;
+        }
+        var flat = flattenPointLayer(layer);
+        var fullPayload = createPointLayerGpuPayloadFromFlat(gl, flat);
+        fullPayload.progressive = false;
+        fullPayload.complete = true;
+        fullPayload.uploaded = flat.count;
+        fullPayload.rows = layer.rows || flat.count;
+        fullPayload.full_upload_ms = ((window.performance && performance.now) ? performance.now() : Date.now()) - started;
+        disposePointLayerPayload(layer);
+        layer._ggwebglPointPayload = fullPayload;
+        layer._ggwebglPointUploadScheduled = false;
+        layer._ggwebglPointUploadComplete = true;
+        layer._ggwebglTransportMetrics = {
+          mode: layer.transport && layer.transport.mode ? layer.transport.mode : "compact",
+          uploaded: fullPayload.uploaded,
+          rows: fullPayload.rows,
+          full_upload_ms: fullPayload.full_upload_ms,
+          decoded_bytes: layer.compact && layer.compact.decoded_bytes ? Number(layer.compact.decoded_bytes) : null
+        };
+        recordPointTransportMetrics(layer, {
+          mode: layer._ggwebglTransportMetrics.mode,
+          uploaded: fullPayload.uploaded,
+          rows: fullPayload.rows,
+          full_upload_ms: fullPayload.full_upload_ms,
+          decoded_bytes: layer._ggwebglTransportMetrics.decoded_bytes,
+          complete: true
+        });
+        redrawCurrent();
+      };
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(run, { timeout: 750 });
+      } else {
+        requestAnimationFrame(run);
+      }
     }
 
     function ensurePointLayerGpuPayload(gl, layer) {
       var cached = layer._ggwebglPointPayload;
       var expectedCount = Number(layer.rows || 0);
 
-      if (cached && cached.gl === gl && cached.count === expectedCount) {
+      if (cached && cached.gl === gl && (cached.count === expectedCount || cached.progressive === true)) {
         return cached;
       }
 
@@ -3001,32 +4963,246 @@ HTMLWidgets.widget({
       return layer._ggwebglPointPayload;
     }
 
-		function flattenLinePath(path) {
+    function finiteTrajectoryNumber(value) {
+      var number = Number(value);
+      return isFinite(number) ? number : null;
+    }
+
+    function pathPointCount(path) {
+      var xs = Array.isArray(path && path.x) ? path.x : [];
+      var ys = Array.isArray(path && path.y) ? path.y : [];
+      return Math.min(xs.length, ys.length);
+    }
+
+    function trajectoryStepDelta(path, i0, i1) {
+      var times = Array.isArray(path.time) ? path.time : null;
+      var frames = Array.isArray(path.frame) ? path.frame : null;
+      var start;
+      var end;
+
+      if (times && times.length > i0 && times.length > i1) {
+        start = finiteTrajectoryNumber(times[i0]);
+        end = finiteTrajectoryNumber(times[i1]);
+        return start === null || end === null ? null : end - start;
+      }
+
+      if (frames && frames.length > i0 && frames.length > i1) {
+        start = finiteTrajectoryNumber(frames[i0]);
+        end = finiteTrajectoryNumber(frames[i1]);
+        return start === null || end === null ? null : end - start;
+      }
+
+      return 1;
+    }
+
+    function trajectoryDistance(path, i0, i1) {
+      var xs = Array.isArray(path.x) ? path.x : [];
+      var ys = Array.isArray(path.y) ? path.y : [];
+      var zs = Array.isArray(path.z) ? path.z : [];
+      var x0 = finiteTrajectoryNumber(xs[i0]);
+      var y0 = finiteTrajectoryNumber(ys[i0]);
+      var x1 = finiteTrajectoryNumber(xs[i1]);
+      var y1 = finiteTrajectoryNumber(ys[i1]);
+      var z0 = 0;
+      var z1 = 0;
+
+      if (x0 === null || y0 === null || x1 === null || y1 === null) {
+        return null;
+      }
+
+      if (zs.length) {
+        z0 = finiteTrajectoryNumber(zs[i0]);
+        z1 = finiteTrajectoryNumber(zs[i1]);
+        if (z0 === null || z1 === null) {
+          return null;
+        }
+      }
+
+      var dx = x1 - x0;
+      var dy = y1 - y0;
+      var dz = z1 - z0;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    function rawTrajectoryVelocity(path) {
+      var n = pathPointCount(path);
+      var values = new Array(n).fill(0);
+
+      for (var i = 1; i < n; i += 1) {
+        var delta = trajectoryStepDelta(path, i - 1, i);
+        var distance = trajectoryDistance(path, i - 1, i);
+        if (delta !== null && distance !== null && isFinite(delta) && isFinite(distance) && delta > 0) {
+          values[i] = distance / delta;
+        }
+      }
+
+      return values;
+    }
+
+    function normalizeFiniteMetric(values, range) {
+      var min = range && isFinite(range[0]) ? Number(range[0]) : Infinity;
+      var max = range && isFinite(range[1]) ? Number(range[1]) : -Infinity;
+
+      if (!range) {
+        values.forEach(function(value) {
+          var number = Number(value);
+          if (isFinite(number)) {
+            min = Math.min(min, number);
+            max = Math.max(max, number);
+          }
+        });
+      }
+
+      if (!isFinite(min) || !isFinite(max) || max <= min) {
+        return values.map(function() { return 0; });
+      }
+
+      return values.map(function(value) {
+        var number = Number(value);
+        return isFinite(number) ? Math.max(0, Math.min(1, (number - min) / (max - min))) : 0;
+      });
+    }
+
+    function computeTrajectoryVelocity(path) {
+      return normalizeFiniteMetric(rawTrajectoryVelocity(path));
+    }
+
+    function computeTrajectoryDirection(path) {
+      var xs = Array.isArray(path.x) ? path.x : [];
+      var ys = Array.isArray(path.y) ? path.y : [];
+      var n = pathPointCount(path);
+      var values = new Array(n).fill(0.5);
+
+      for (var i = 1; i < n; i += 1) {
+        var x0 = finiteTrajectoryNumber(xs[i - 1]);
+        var y0 = finiteTrajectoryNumber(ys[i - 1]);
+        var x1 = finiteTrajectoryNumber(xs[i]);
+        var y1 = finiteTrajectoryNumber(ys[i]);
+        if (x0 === null || y0 === null || x1 === null || y1 === null) {
+          values[i] = values[i - 1];
+          continue;
+        }
+        var dx = x1 - x0;
+        var dy = y1 - y0;
+        if (Math.sqrt(dx * dx + dy * dy) <= 1e-12) {
+          values[i] = values[i - 1];
+          continue;
+        }
+        values[i] = Math.max(0, Math.min(1, (Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI)));
+      }
+
+      if (n > 1) {
+        values[0] = values[1];
+      }
+
+      return values;
+    }
+
+    function computeLayerTrajectoryMetrics(layer, shaderMode) {
+      var paths = linePathList(layer && layer.paths);
+      if (shaderMode === 4) {
+        var rawByPath = paths.map(rawTrajectoryVelocity);
+        var min = Infinity;
+        var max = -Infinity;
+        rawByPath.forEach(function(values) {
+          values.forEach(function(value) {
+            var number = Number(value);
+            if (isFinite(number)) {
+              min = Math.min(min, number);
+              max = Math.max(max, number);
+            }
+          });
+        });
+        return rawByPath.map(function(values) {
+          return normalizeFiniteMetric(values, [min, max]);
+        });
+      }
+
+      if (shaderMode === 5) {
+        return paths.map(computeTrajectoryDirection);
+      }
+
+      return paths.map(function(path) {
+        return new Array(pathPointCount(path)).fill(0);
+      });
+    }
+
+    function trajectoryMetricAt(metrics, index) {
+      if (!Array.isArray(metrics) || index < 0 || index >= metrics.length) {
+        return 0;
+      }
+      var value = Number(metrics[index]);
+      return isFinite(value) ? value : 0;
+    }
+
+		function flattenLinePath(path, xScene, metrics) {
 		  var xs = Array.isArray(path.x) ? path.x : [];
 		  var ys = Array.isArray(path.y) ? path.y : [];
 		  var ages = Array.isArray(path.age) ? path.age : [];
 		  var rgba = Array.isArray(path.rgba) ? path.rgba : [];
 		
 		  var n = Math.min(xs.length, ys.length);
+      var timelineClipped = xScene && state.timeline && state.timeline.enabled && layerHasTimelineValues(path, state.timeline);
 		
-		  if (!n) {
+		  if (!n || (timelineClipped && n < 2)) {
 			return {
 			  count: 0,
+        mode: "line_strip",
 			  positions: new Float32Array(0),
 			  ages: new Float32Array(0),
-			  colors: new Float32Array(0)
+			  colors: new Float32Array(0),
+        metrics: new Float32Array(0)
 			};
 		  }
+
+      if (timelineClipped) {
+        var segmentPositions = [];
+        var segmentAges = [];
+        var segmentColors = [];
+        var segmentMetrics = [];
+        function pushSegmentVertex(index) {
+          segmentPositions.push(Number(xs[index]), Number(ys[index]));
+          segmentAges.push(isFinite(ages[index]) ? Number(ages[index]) : 1.0);
+          segmentMetrics.push(trajectoryMetricAt(metrics, index));
+          if (rgba.length >= (index * 4 + 4)) {
+            segmentColors.push(
+              Number(rgba[index * 4 + 0]),
+              Number(rgba[index * 4 + 1]),
+              Number(rgba[index * 4 + 2]),
+              Number(rgba[index * 4 + 3])
+            );
+          } else {
+            segmentColors.push(0.1, 0.1, 0.1, 1.0);
+          }
+        }
+        for (var s = 0; s < n - 1; s += 1) {
+          if (!pathSegmentVisible(path, s, s + 1, xScene)) {
+            continue;
+          }
+          pushSegmentVertex(s);
+          pushSegmentVertex(s + 1);
+        }
+        return {
+          count: segmentAges.length,
+          mode: "lines",
+          positions: new Float32Array(segmentPositions),
+          ages: new Float32Array(segmentAges),
+          colors: new Float32Array(segmentColors),
+          metrics: new Float32Array(segmentMetrics)
+        };
+      }
 		
 		  var positions = new Float32Array(n * 2);
 		  var pathAges = new Float32Array(n);
 		  var colors = new Float32Array(n * 4);
+      var pathMetrics = new Float32Array(n);
 		
 		  for (var i = 0; i < n; i += 1) {
 			positions[i * 2] = Number(xs[i]);
 			positions[i * 2 + 1] = Number(ys[i]);
 		
 			pathAges[i] = isFinite(ages[i]) ? Number(ages[i]) : 1.0;
+      pathMetrics[i] = trajectoryMetricAt(metrics, i);
 		
 			if (rgba.length >= (i * 4 + 4)) {
 			  colors[i * 4 + 0] = Number(rgba[i * 4 + 0]);
@@ -3041,15 +5217,83 @@ HTMLWidgets.widget({
 			}
 		  }
 		
-		  return {
-			count: n,
-			positions: positions,
-			ages: pathAges,
-			colors: colors
-		  };
-		}
+		return {
+		  count: n,
+      mode: "line_strip",
+		  positions: positions,
+		  ages: pathAges,
+		  colors: colors,
+      metrics: pathMetrics
+		};
+	}
 
-    function flattenLinePathToStyledQuads(path, viewport, plotWidthPx, plotHeightPx, joinMode, capMode, xScene, projectViewport) {
+    function flattenLinePath3d(path, x, viewport, metrics) {
+      var xs = Array.isArray(path.x) ? path.x : [];
+      var ys = Array.isArray(path.y) ? path.y : [];
+      var zs = Array.isArray(path.z) ? path.z : [];
+      var ages = Array.isArray(path.age) ? path.age : [];
+      var rgba = Array.isArray(path.rgba) ? path.rgba : [];
+      var n = Math.min(xs.length, ys.length);
+      var zRange = layerZRange(zs);
+      var positions = [];
+      var pathAges = [];
+      var colors = [];
+      var pathMetrics = [];
+      var timelineClipped = x && state.timeline && state.timeline.enabled && layerHasTimelineValues(path, state.timeline);
+
+      function push3dVertex(index) {
+        var point = normalizePosition3(xs[index], ys[index], zs[index] || 0, viewport, zRange);
+        positions.push(point[0], point[1], point[2]);
+        pathAges.push(isFinite(ages[index]) ? Number(ages[index]) : 1.0);
+        pathMetrics.push(trajectoryMetricAt(metrics, index));
+        if (rgba.length >= (index * 4 + 4)) {
+          colors.push(
+            normalizeColorComponent(rgba[index * 4 + 0], 0.1),
+            normalizeColorComponent(rgba[index * 4 + 1], 0.1),
+            normalizeColorComponent(rgba[index * 4 + 2], 0.1),
+            normalizeColorComponent(rgba[index * 4 + 3], 1.0)
+          );
+        } else {
+          colors.push(0.1, 0.1, 0.1, 1.0);
+        }
+      }
+
+      if (timelineClipped) {
+        for (var s = 0; s < n - 1; s += 1) {
+          if (!pathSegmentVisible(path, s, s + 1, x)) {
+            continue;
+          }
+          push3dVertex(s);
+          push3dVertex(s + 1);
+        }
+        return {
+          count: pathAges.length,
+          mode: "lines",
+          positions: new Float32Array(positions),
+          ages: new Float32Array(pathAges),
+          colors: new Float32Array(colors),
+          metrics: new Float32Array(pathMetrics)
+        };
+      }
+
+      for (var i = 0; i < n; i += 1) {
+        if (x && !pathIndexVisible(path, i, x)) {
+          continue;
+        }
+        push3dVertex(i);
+      }
+
+      return {
+        count: pathAges.length,
+        mode: "line_strip",
+        positions: new Float32Array(positions),
+        ages: new Float32Array(pathAges),
+        colors: new Float32Array(colors),
+        metrics: new Float32Array(pathMetrics)
+      };
+    }
+
+    function flattenLinePathToStyledQuads(path, viewport, plotWidthPx, plotHeightPx, joinMode, capMode, xScene, projectViewport, metrics) {
       var xs = Array.isArray(path.x) ? path.x : [];
       var ys = Array.isArray(path.y) ? path.y : [];
       var zs = Array.isArray(path.z) ? path.z : [];
@@ -3064,7 +5308,8 @@ HTMLWidgets.widget({
           count: 0,
           positions: new Float32Array(0),
           ages: new Float32Array(0),
-          colors: new Float32Array(0)
+          colors: new Float32Array(0),
+          metrics: new Float32Array(0)
         };
       }
 
@@ -3081,6 +5326,7 @@ HTMLWidgets.widget({
 
       var positions = [];
       var outAges = [];
+      var outMetrics = [];
       var colors = [];
 
       function pointAt(i) {
@@ -3090,9 +5336,10 @@ HTMLWidgets.widget({
         return { x: Number(xs[i]), y: Number(ys[i]) };
       }
 
-      function pushVertex(x, y, age, r, g, b, a) {
+      function pushVertex(x, y, age, metric, r, g, b, a) {
         positions.push(x, y);
         outAges.push(isFinite(age) ? age : 1.0);
+        outMetrics.push(isFinite(metric) ? metric : 0.0);
         colors.push(r, g, b, a);
       }
 
@@ -3134,7 +5381,7 @@ HTMLWidgets.widget({
       }
 
       function addSegmentQuad(i0, i1) {
-        if (!pathIndexVisible(path, i0, xScene) || !pathIndexVisible(path, i1, xScene)) {
+        if (!pathSegmentVisible(path, i0, i1, xScene)) {
           return;
         }
         var p0 = pointAt(i0);
@@ -3156,17 +5403,19 @@ HTMLWidgets.widget({
         var c1 = colorAt(i1);
         var a0 = isFinite(ages[i0]) ? Number(ages[i0]) : 1.0;
         var a1 = isFinite(ages[i1]) ? Number(ages[i1]) : 1.0;
+        var m0 = trajectoryMetricAt(metrics, i0);
+        var m1 = trajectoryMetricAt(metrics, i1);
 
-        pushVertex(x0 - off.x, y0 - off.y, a0, c0[0], c0[1], c0[2], c0[3]);
-        pushVertex(x0 + off.x, y0 + off.y, a0, c0[0], c0[1], c0[2], c0[3]);
-        pushVertex(x1 - off.x, y1 - off.y, a1, c1[0], c1[1], c1[2], c1[3]);
-        pushVertex(x1 - off.x, y1 - off.y, a1, c1[0], c1[1], c1[2], c1[3]);
-        pushVertex(x0 + off.x, y0 + off.y, a0, c0[0], c0[1], c0[2], c0[3]);
-        pushVertex(x1 + off.x, y1 + off.y, a1, c1[0], c1[1], c1[2], c1[3]);
+        pushVertex(x0 - off.x, y0 - off.y, a0, m0, c0[0], c0[1], c0[2], c0[3]);
+        pushVertex(x0 + off.x, y0 + off.y, a0, m0, c0[0], c0[1], c0[2], c0[3]);
+        pushVertex(x1 - off.x, y1 - off.y, a1, m1, c1[0], c1[1], c1[2], c1[3]);
+        pushVertex(x1 - off.x, y1 - off.y, a1, m1, c1[0], c1[1], c1[2], c1[3]);
+        pushVertex(x0 + off.x, y0 + off.y, a0, m0, c0[0], c0[1], c0[2], c0[3]);
+        pushVertex(x1 + off.x, y1 + off.y, a1, m1, c1[0], c1[1], c1[2], c1[3]);
       }
 
       function addBevelJoin(i) {
-        if (!pathIndexVisible(path, i, xScene)) {
+        if (!pathSegmentVisible(path, i - 1, i, xScene) || !pathSegmentVisible(path, i, i + 1, xScene)) {
           return;
         }
         if (joinMode !== "bevel" || i <= 0 || i >= n - 1) {
@@ -3197,10 +5446,11 @@ HTMLWidgets.widget({
         var outward1 = pixelOffsetToData(cross > 0 ? u1.nx : -u1.nx, cross > 0 ? u1.ny : -u1.ny);
         var c = colorAt(i);
         var a = isFinite(ages[i]) ? Number(ages[i]) : 1.0;
+        var m = trajectoryMetricAt(metrics, i);
 
-        pushVertex(x0, y0, a, c[0], c[1], c[2], c[3]);
-        pushVertex(x0 + outward0.x, y0 + outward0.y, a, c[0], c[1], c[2], c[3]);
-        pushVertex(x0 + outward1.x, y0 + outward1.y, a, c[0], c[1], c[2], c[3]);
+        pushVertex(x0, y0, a, m, c[0], c[1], c[2], c[3]);
+        pushVertex(x0 + outward0.x, y0 + outward0.y, a, m, c[0], c[1], c[2], c[3]);
+        pushVertex(x0 + outward1.x, y0 + outward1.y, a, m, c[0], c[1], c[2], c[3]);
       }
 
       function addRoundCap(index, atEnd) {
@@ -3210,6 +5460,9 @@ HTMLWidgets.widget({
 
         var neighbor = atEnd ? index - 1 : index + 1;
         if (neighbor < 0 || neighbor >= n) {
+          return;
+        }
+        if (!pathSegmentVisible(path, Math.min(index, neighbor), Math.max(index, neighbor), xScene)) {
           return;
         }
 
@@ -3230,15 +5483,16 @@ HTMLWidgets.widget({
         var stop  = atEnd ? angleBase + Math.PI / 2 : angleBase + 3 * Math.PI / 2;
         var c = colorAt(index);
         var a = isFinite(ages[index]) ? Number(ages[index]) : 1.0;
+        var m = trajectoryMetricAt(metrics, index);
 
         for (var s = 0; s < capSegments; s += 1) {
           var t0 = start + (stop - start) * (s / capSegments);
           var t1 = start + (stop - start) * ((s + 1) / capSegments);
           var off0 = pixelOffsetToData(Math.cos(t0), Math.sin(t0));
           var off1 = pixelOffsetToData(Math.cos(t1), Math.sin(t1));
-          pushVertex(x0, y0, a, c[0], c[1], c[2], c[3]);
-          pushVertex(x0 + off0.x, y0 + off0.y, a, c[0], c[1], c[2], c[3]);
-          pushVertex(x0 + off1.x, y0 + off1.y, a, c[0], c[1], c[2], c[3]);
+          pushVertex(x0, y0, a, m, c[0], c[1], c[2], c[3]);
+          pushVertex(x0 + off0.x, y0 + off0.y, a, m, c[0], c[1], c[2], c[3]);
+          pushVertex(x0 + off1.x, y0 + off1.y, a, m, c[0], c[1], c[2], c[3]);
         }
       }
 
@@ -3257,6 +5511,7 @@ HTMLWidgets.widget({
         count: positions.length / 2,
         positions: new Float32Array(positions),
         ages: new Float32Array(outAges),
+        metrics: new Float32Array(outMetrics),
         colors: new Float32Array(colors)
       };
     }
@@ -3274,6 +5529,69 @@ HTMLWidgets.widget({
         interpolate: !!layer.interpolate,
         pixels: new Uint8Array(pixels)
       };
+    }
+
+    function rgbaCss(values, index, fallback) {
+      var offset = index * 4;
+      if (!Array.isArray(values) || values.length < offset + 4) {
+        return fallback || "rgba(44,62,80,1)";
+      }
+      var r = Math.max(0, Math.min(255, Math.round(Number(values[offset]) * 255)));
+      var g = Math.max(0, Math.min(255, Math.round(Number(values[offset + 1]) * 255)));
+      var b = Math.max(0, Math.min(255, Math.round(Number(values[offset + 2]) * 255)));
+      var a = Math.max(0, Math.min(1, Number(values[offset + 3])));
+      return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+    }
+
+    function dataToPanelOverlayPoint(x, y, panel, box) {
+      var viewport = currentViewport(panel);
+      var xSpan = Math.max(1e-12, viewport.x[1] - viewport.x[0]);
+      var ySpan = Math.max(1e-12, viewport.y[1] - viewport.y[0]);
+
+      return {
+        x: box.plotLeft + ((Number(x) - viewport.x[0]) / xSpan) * box.plotWidth,
+        y: box.plotTop + (1 - ((Number(y) - viewport.y[0]) / ySpan)) * box.plotHeight
+      };
+    }
+
+    function renderTextOverlayLayer(layer, panel, box) {
+      if (!state.panelOverlayFront || !layer || layer.type !== "text" || !layer.rows) {
+        return;
+      }
+
+      for (var i = 0; i < layer.rows; i += 1) {
+        var label = layer.label[i];
+        var x = Number(layer.x[i]);
+        var y = Number(layer.y[i]);
+        if (!label || !isFinite(x) || !isFinite(y)) {
+          continue;
+        }
+
+        var point = dataToPanelOverlayPoint(x, y, panel, box);
+        var hjust = isFinite(Number(layer.hjust[i])) ? Number(layer.hjust[i]) : 0.5;
+        var vjust = isFinite(Number(layer.vjust[i])) ? Number(layer.vjust[i]) : 0.5;
+        var size = Math.max(8, isFinite(Number(layer.size[i])) ? Number(layer.size[i]) : 12);
+        var angle = isFinite(Number(layer.angle[i])) ? Number(layer.angle[i]) : 0;
+        var item = document.createElement("div");
+        item.className = layer.label_box ? "ggwebgl__text-overlay ggwebgl__text-overlay--label" : "ggwebgl__text-overlay";
+        item.textContent = label;
+        item.style.left = point.x + "px";
+        item.style.top = point.y + "px";
+        item.style.color = rgbaCss(layer.rgba, i, "rgba(44,62,80,1)");
+        item.style.fontSize = size + "px";
+        item.style.lineHeight = String(Math.max(0.8, isFinite(Number(layer.lineheight[i])) ? Number(layer.lineheight[i]) : 1.2));
+        item.style.fontFamily = layer.family && layer.family[i] ? layer.family[i] : "inherit";
+        item.style.fontWeight = String(layer.fontface && layer.fontface[i]) === "2" ? "700" : "500";
+        item.style.transform = "translate(" + (-100 * hjust) + "%, " + (-100 * vjust) + "%) rotate(" + angle + "deg)";
+
+        if (layer.label_box) {
+          item.style.background = rgbaCss(layer.label_box.fill_rgba, i, "rgba(248,250,252,0.86)");
+          item.style.borderColor = rgbaCss(layer.rgba, i, "rgba(44,62,80,0.35)");
+          item.style.borderWidth = Math.max(0, Number(layer.label_box.linewidth && layer.label_box.linewidth[i]) || 0) + "px";
+        }
+
+        state.panelOverlayFront.appendChild(item);
+      }
     }
 
 	function renderPanelOverlay(x) {
@@ -3346,6 +5664,12 @@ HTMLWidgets.widget({
 	
 		  state.panelOverlayFront.appendChild(frame);
 		}
+
+        (box.panel.layers || []).forEach(function(layer) {
+          if (layer.type === "text") {
+            renderTextOverlayLayer(layer, box.panel, box);
+          }
+        });
 	  });
 	}
 
@@ -3425,7 +5749,11 @@ HTMLWidgets.widget({
         "Points: <strong>" + escapeHtml(render.point_count || 0) + "</strong>",
         "Line vertices: <strong>" + escapeHtml(render.line_vertex_count || 0) + "</strong>",
         "Vectors: <strong>" + escapeHtml(render.vector_count || 0) + "</strong>",
+        "Rects: <strong>" + escapeHtml(render.rect_count || 0) + "</strong>",
+        "Ribbons: <strong>" + escapeHtml(render.ribbon_count || 0) + "</strong>",
+        "Text labels: <strong>" + escapeHtml(render.text_count || 0) + "</strong>",
         "Mesh triangles: <strong>" + escapeHtml(render.mesh_triangle_count || 0) + "</strong>",
+        "Surface triangles: <strong>" + escapeHtml(render.surface_triangle_count || 0) + "</strong>",
         "Raster cells: <strong>" + escapeHtml(render.raster_cell_count || 0) + "</strong>"
       ].join(" | ");
 
@@ -3486,6 +5814,24 @@ HTMLWidgets.widget({
       return buffer;
     }
 
+    function bindMetricAttribute(gl, programInfo, values) {
+      var buffer = createBuffer(gl, values);
+      if (programInfo.attributes.metric < 0) {
+        return buffer;
+      }
+      gl.enableVertexAttribArray(programInfo.attributes.metric);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.vertexAttribPointer(programInfo.attributes.metric, 1, gl.FLOAT, false, 0, 0);
+      return buffer;
+    }
+
+    function bindConstantMetricAttribute(gl, programInfo) {
+      if (programInfo.attributes.metric >= 0) {
+        gl.disableVertexAttribArray(programInfo.attributes.metric);
+        gl.vertexAttrib1f(programInfo.attributes.metric, 0.0);
+      }
+    }
+
     function bindTexcoordAttribute(gl, programInfo, values) {
       var buffer = createBuffer(gl, values);
       gl.enableVertexAttribArray(programInfo.attributes.texcoord);
@@ -3507,8 +5853,42 @@ HTMLWidgets.widget({
       };
     }
 
+    function configurePrimitiveBlending(gl, x, shaderMode, layerType) {
+      var mode = blendMode(x);
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.FUNC_ADD);
+      if (mode === "additive") {
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      } else if (mode === "premultiplied") {
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      } else if (shaderMode === 1) {
+        if (layerType === "points" && mode === "auto") {
+          gl.blendFuncSeparate(
+            gl.SRC_ALPHA,
+            gl.ONE_MINUS_SRC_ALPHA,
+            gl.ONE,
+            gl.ONE_MINUS_SRC_ALPHA
+          );
+        } else {
+          gl.blendFuncSeparate(
+            gl.SRC_ALPHA,
+            gl.ONE_MINUS_SRC_ALPHA,
+            gl.ONE,
+            gl.ONE_MINUS_SRC_ALPHA
+          );
+        }
+      } else {
+        gl.blendFuncSeparate(
+          gl.SRC_ALPHA,
+          gl.ONE_MINUS_SRC_ALPHA,
+          gl.ONE,
+          gl.ONE_MINUS_SRC_ALPHA
+        );
+      }
+    }
+
     function configurePrimitiveLayerShader(gl, programInfo, x, layerType, viewport, layer) {
-      var shaderMode = shaderModeForLayer(x, layerType);
+      var shaderMode = shaderModeForLayer(x, layerType, layer);
       var isPointLayer = layerType === "points" ? 1.0 : 0.0;
       var densityTuning = densitySplatTuning(layer && layer.rows);
 
@@ -3533,40 +5913,62 @@ HTMLWidgets.widget({
       gl.uniform1f(programInfo.uniforms.minPointSize, minPointSize);
       gl.uniform1f(programInfo.uniforms.densityAlphaBoost, densityAlphaBoost);
       gl.uniform1f(programInfo.uniforms.densityAlphaCeiling, densityAlphaCeiling);
-
-      if (layerType === "points") {
-        gl.enable(gl.BLEND);
-
-        if (shaderMode === 1) {
-          gl.blendEquation(gl.FUNC_ADD);
-          gl.blendFuncSeparate(
-            gl.SRC_ALPHA,
-            gl.ONE_MINUS_SRC_ALPHA,
-            gl.ONE,
-            gl.ONE_MINUS_SRC_ALPHA
-          );
-        } else {
-          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-        }
-      } else {
-        gl.blendFuncSeparate(
-          gl.SRC_ALPHA,
-          gl.ONE_MINUS_SRC_ALPHA,
-          gl.ONE,
-          gl.ONE_MINUS_SRC_ALPHA
-        );
-      }
+      configurePrimitiveBlending(gl, x, shaderMode, layerType);
     }
 
-    function configureRasterProgram(gl, programInfo, viewport) {
+    function configurePrimitive3dLayerShader(gl, programInfo, x, layerType, matrix, layer) {
+      var shaderMode = shaderModeForLayer(x, layerType, layer);
+      var densityTuning = densitySplatTuning(layer && layer.rows);
+      var pointScale = layerType === "points" && shaderMode === 1 ? densityTuning.pointScale : 1.6;
+      var minPointSize = layerType === "points" && shaderMode === 1 ? densityTuning.minPointSize : 1.0;
+      var densityAlphaBoost = layerType === "points" && shaderMode === 1 ? densityTuning.alphaBoost : 1.0;
+      var densityAlphaCeiling = layerType === "points" && shaderMode === 1 ? densityTuning.alphaCeiling : 0.90;
+
+      gl.useProgram(programInfo.program);
+      gl.uniformMatrix4fv(programInfo.uniforms.viewProjection, false, new Float32Array(matrix));
+      gl.uniform1f(programInfo.uniforms.shaderMode, shaderMode);
+      gl.uniform1f(programInfo.uniforms.isPointLayer, layerType === "points" ? 1.0 : 0.0);
+      gl.uniform1f(programInfo.uniforms.pointScale, pointScale);
+      gl.uniform1f(programInfo.uniforms.minPointSize, minPointSize);
+      gl.uniform1f(programInfo.uniforms.densityAlphaBoost, densityAlphaBoost);
+      gl.uniform1f(programInfo.uniforms.densityAlphaCeiling, densityAlphaCeiling);
+      configurePrimitiveBlending(gl, x, shaderMode, layerType);
+    }
+
+    function draw3dPointLayer(gl, programs, layer, x, viewport, box) {
+      var payload = createPointLayerGpuPayloadFromFlat(gl, flattenPointLayer3d(layer, x, viewport));
+      if (!payload.count) {
+        disposeTransientPointPayload(payload);
+        return;
+      }
+      var primitive = programs.primitive3d;
+      configurePrimitive3dLayerShader(gl, primitive, x, "points", cameraViewProjectionMatrix(x, box), layer);
+      bindAttributeBuffer(gl, primitive.attributes.position3, payload.positionBuffer, 3);
+      bindAttributeBuffer(gl, primitive.attributes.size, payload.sizeBuffer, 1);
+      bindAttributeBuffer(gl, primitive.attributes.age, payload.ageBuffer, 1);
+      bindAttributeBuffer(gl, primitive.attributes.color, payload.colorBuffer, 4);
+      bindConstantMetricAttribute(gl, primitive);
+      gl.drawArrays(gl.POINTS, 0, payload.count);
+      disposeTransientPointPayload(payload);
+    }
+
+    function configureRasterProgram(gl, programInfo, viewport, x, layer) {
       gl.useProgram(programInfo.program);
       gl.uniform4f(programInfo.uniforms.domain, viewport.x[0], viewport.x[1], viewport.y[0], viewport.y[1]);
+      if (programInfo.uniforms.shaderMode) {
+        gl.uniform1f(programInfo.uniforms.shaderMode, shaderModeForLayer(x, "raster", layer));
+      }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     function drawPointLayer(gl, programs, layer, x, viewport) {
+      var box = arguments.length > 5 ? arguments[5] : null;
+      if (sceneDimension(x) === "3d") {
+        draw3dPointLayer(gl, programs, layer, x, viewport, box);
+        return;
+      }
       var dynamic = sceneDimension(x) === "3d" || currentTimelineFrame(x) !== null;
-      var drawViewport = sceneDimension(x) === "3d" ? { x: [-1.2, 1.2], y: [-1.2, 1.2] } : viewport;
+      var drawViewport = viewport;
       var payload = dynamic
         ? createPointLayerGpuPayloadFromFlat(gl, flattenPointLayer(layer, x, viewport))
         : ensurePointLayerGpuPayload(gl, layer);
@@ -3580,6 +5982,7 @@ HTMLWidgets.widget({
       bindAttributeBuffer(gl, programs.primitive.attributes.size, payload.sizeBuffer, 1);
       bindAttributeBuffer(gl, programs.primitive.attributes.age, payload.ageBuffer, 1);
       bindAttributeBuffer(gl, programs.primitive.attributes.color, payload.colorBuffer, 4);
+      bindConstantMetricAttribute(gl, programs.primitive);
 
       gl.drawArrays(gl.POINTS, 0, payload.count);
 
@@ -3597,7 +6000,13 @@ HTMLWidgets.widget({
 
       var xs = [];
       var ys = [];
+      var selectedIds = {};
       result.selections.forEach(function(selection) {
+        (selection.ids || []).forEach(function(id) {
+          if (id !== null && id !== undefined && String(id).length) {
+            selectedIds[String(id)] = true;
+          }
+        });
         if (String(selection.panel_id) !== String(panel.panel_id)) {
           return;
         }
@@ -3615,6 +6024,22 @@ HTMLWidgets.widget({
           }
         });
       });
+
+      if (Object.keys(selectedIds).length) {
+        (panel.layers || []).forEach(function(layer) {
+          if (layer.type !== "points" && layer.type !== "vectors") {
+            return;
+          }
+          var ids = layer.id || [];
+          for (var i = 0; i < ids.length; i += 1) {
+            if (!selectedIds[String(ids[i])]) {
+              continue;
+            }
+            xs.push(Number(layer.x[i]));
+            ys.push(Number(layer.y[i]));
+          }
+        });
+      }
 
       var n = xs.length;
       if (!n) {
@@ -3645,63 +6070,75 @@ HTMLWidgets.widget({
     function drawLineLayerNative(gl, programs, layer, x, viewport) {
       var paths = linePathList(layer.paths);
       var primitive = programs.primitive;
+      var shaderMode = shaderModeForLayer(x, "lines", layer);
+      var metricsByPath = computeLayerTrajectoryMetrics(layer, shaderMode);
 
-      gl.useProgram(primitive.program);
-      gl.disable(gl.BLEND);
-
-      gl.uniform4f(
-        primitive.uniforms.domain,
-        viewport.x[0], viewport.x[1],
-        viewport.y[0], viewport.y[1]
-      );
-      gl.uniform1f(primitive.uniforms.shaderMode, 0.0);
-      gl.uniform1f(primitive.uniforms.isPointLayer, 0.0);
-      gl.uniform1f(primitive.uniforms.pointScale, 1.0);
-      gl.uniform1f(primitive.uniforms.minPointSize, 1.0);
+      configurePrimitiveLayerShader(gl, primitive, x, "lines", viewport, layer);
 
       if (primitive.attributes.size >= 0) {
         gl.disableVertexAttribArray(primitive.attributes.size);
         gl.vertexAttrib1f(primitive.attributes.size, 3.0);
       }
 
-      if (primitive.attributes.age >= 0) {
-        gl.disableVertexAttribArray(primitive.attributes.age);
-        gl.vertexAttrib1f(primitive.attributes.age, 1.0);
-      }
-
-      if (primitive.attributes.color >= 0) {
-        gl.disableVertexAttribArray(primitive.attributes.color);
-      }
-
-      paths.forEach(function(path) {
-        var payload = flattenLinePath(path);
+      paths.forEach(function(path, pathIndex) {
+        var payload = flattenLinePath(path, x, metricsByPath[pathIndex]);
 
         if (!payload || payload.count < 2) {
           return;
         }
 
         var positionBuffer = bindPositionAttribute(gl, primitive, payload.positions);
+        var ageBuffer = bindAgeAttribute(gl, primitive, payload.ages);
+        var colorBuffer = bindColorAttribute(gl, primitive, payload.colors);
+        var metricBuffer = bindMetricAttribute(gl, primitive, payload.metrics);
 
-        if (primitive.attributes.color >= 0) {
-          gl.vertexAttrib4f(primitive.attributes.color, 0.1, 0.1, 0.1, 1.0);
-        }
-        gl.drawArrays(gl.LINE_STRIP, 0, payload.count);
+        gl.drawArrays(payload.mode === "lines" ? gl.LINES : gl.LINE_STRIP, 0, payload.count);
 
         gl.deleteBuffer(positionBuffer);
+        gl.deleteBuffer(ageBuffer);
+        gl.deleteBuffer(colorBuffer);
+        gl.deleteBuffer(metricBuffer);
       });
+    }
 
-      gl.enable(gl.BLEND);
-      gl.blendFuncSeparate(
-        gl.SRC_ALPHA,
-        gl.ONE_MINUS_SRC_ALPHA,
-        gl.ONE,
-        gl.ONE_MINUS_SRC_ALPHA
-      );
+    function drawLineLayer3d(gl, programs, layer, x, viewport, box) {
+      var paths = linePathList(layer.paths);
+      var primitive = programs.primitive3d;
+      var shaderMode = shaderModeForLayer(x, "lines", layer);
+      var metricsByPath = computeLayerTrajectoryMetrics(layer, shaderMode);
+      configurePrimitive3dLayerShader(gl, primitive, x, "lines", cameraViewProjectionMatrix(x, box), layer);
+
+      if (primitive.attributes.size >= 0) {
+        gl.disableVertexAttribArray(primitive.attributes.size);
+        gl.vertexAttrib1f(primitive.attributes.size, 1.0);
+      }
+
+      paths.forEach(function(path, pathIndex) {
+        var payload = flattenLinePath3d(path, x, viewport, metricsByPath[pathIndex]);
+        if (!payload || payload.count < 2) {
+          return;
+        }
+        var positionBuffer = createBuffer(gl, payload.positions);
+        bindAttributeBuffer(gl, primitive.attributes.position3, positionBuffer, 3);
+        var ageBuffer = bindAgeAttribute(gl, primitive, payload.ages);
+        var colorBuffer = bindColorAttribute(gl, primitive, payload.colors);
+        var metricBuffer = bindMetricAttribute(gl, primitive, payload.metrics);
+        gl.drawArrays(payload.mode === "lines" ? gl.LINES : gl.LINE_STRIP, 0, payload.count);
+        gl.deleteBuffer(positionBuffer);
+        gl.deleteBuffer(ageBuffer);
+        gl.deleteBuffer(colorBuffer);
+        gl.deleteBuffer(metricBuffer);
+      });
     }
 
     function drawLineLayer(gl, programs, layer, x, viewport, box) {
       var mode = lineRenderMode(x);
       var drawViewport = sceneDimension(x) === "3d" ? { x: [-1.2, 1.2], y: [-1.2, 1.2] } : viewport;
+
+      if (sceneDimension(x) === "3d") {
+        drawLineLayer3d(gl, programs, layer, x, viewport, box);
+        return;
+      }
 
       if (mode === "native") {
         drawLineLayerNative(gl, programs, layer, x, drawViewport);
@@ -3714,6 +6151,8 @@ HTMLWidgets.widget({
       var plotHeightPx = Math.max(1, box && box.plotHeight ? box.plotHeight : 1);
       var joinMode = lineJoinMode(x);
       var capMode = lineCapMode(x);
+      var shaderMode = shaderModeForLayer(x, "lines", layer);
+      var metricsByPath = computeLayerTrajectoryMetrics(layer, shaderMode);
 
       configurePrimitiveLayerShader(gl, primitive, x, "lines", drawViewport, layer);
 
@@ -3730,8 +6169,8 @@ HTMLWidgets.widget({
         gl.ONE_MINUS_SRC_ALPHA
       );
 
-      paths.forEach(function(path) {
-        var payload = flattenLinePathToStyledQuads(path, drawViewport, plotWidthPx, plotHeightPx, joinMode, capMode, x, viewport);
+      paths.forEach(function(path, pathIndex) {
+        var payload = flattenLinePathToStyledQuads(path, drawViewport, plotWidthPx, plotHeightPx, joinMode, capMode, x, viewport, metricsByPath[pathIndex]);
 
         if (!payload || payload.count < 3) {
           return;
@@ -3740,12 +6179,14 @@ HTMLWidgets.widget({
         var positionBuffer = bindPositionAttribute(gl, primitive, payload.positions);
         var ageBuffer = bindAgeAttribute(gl, primitive, payload.ages);
         var colorBuffer = bindColorAttribute(gl, primitive, payload.colors);
+        var metricBuffer = bindMetricAttribute(gl, primitive, payload.metrics);
 
         gl.drawArrays(gl.TRIANGLES, 0, payload.count);
 
         gl.deleteBuffer(positionBuffer);
         gl.deleteBuffer(ageBuffer);
         gl.deleteBuffer(colorBuffer);
+        gl.deleteBuffer(metricBuffer);
       });
     }
 
@@ -3761,9 +6202,11 @@ HTMLWidgets.widget({
       var heads = layer.head_size || [];
       var rgba = layer.rgba || [];
       var use3d = x && sceneDimension(x) === "3d";
-      var geometryViewport = use3d ? { x: [-1.2, 1.2], y: [-1.2, 1.2] } : viewport;
+      var geometryViewport = use3d ? { x: [-1, 1], y: [-1, 1] } : viewport;
       var xSpan = Math.max(1e-6, geometryViewport.x[1] - geometryViewport.x[0]);
       var ySpan = Math.max(1e-6, geometryViewport.y[1] - geometryViewport.y[0]);
+      var zRange = use3d ? vectorLayerZRange(layer) : null;
+      var viewProjection = use3d ? cameraViewProjectionMatrix(x, box) : null;
       var positions = [];
       var ages = [];
       var colors = [];
@@ -3778,8 +6221,14 @@ HTMLWidgets.widget({
         if (!layerIndexVisible(layer, i, x)) {
           continue;
         }
-        var start = use3d ? project3dPoint(xs[i], ys[i], zs[i] || 0, viewport, layer) : { x: Number(xs[i]), y: Number(ys[i]) };
-        var end = use3d ? project3dPoint(xends[i], yends[i], zends[i] || zs[i] || 0, viewport, layer) : { x: Number(xends[i]), y: Number(yends[i]) };
+        var startZ = isFinite(Number(zs[i])) ? Number(zs[i]) : 0;
+        var endZ = isFinite(Number(zends[i])) ? Number(zends[i]) : startZ;
+        var start = use3d
+          ? projectVectorEndpoint3d(xs[i], ys[i], startZ, viewport, zRange, viewProjection)
+          : { x: Number(xs[i]), y: Number(ys[i]) };
+        var end = use3d
+          ? projectVectorEndpoint3d(xends[i], yends[i], endZ, viewport, zRange, viewProjection)
+          : { x: Number(xends[i]), y: Number(yends[i]) };
         var x0 = Number(start.x), y0 = Number(start.y);
         var x1 = Number(end.x), y1 = Number(end.y);
         if (!isFinite(x0) || !isFinite(y0) || !isFinite(x1) || !isFinite(y1)) {
@@ -3791,16 +6240,20 @@ HTMLWidgets.widget({
         if (!(lenPx > 1e-6)) {
           continue;
         }
+        // Arrowhead direction is derived after projection so rotated 3D vectors
+        // stay registered with points and paths using the same camera matrix.
         var tx = dxPx / lenPx;
         var ty = dyPx / lenPx;
         var nx = -ty;
         var ny = tx;
         var halfWidth = Math.max(1, Number(widths[i]) || 1.5) * 0.5;
-        var head = Math.max(3, Number(heads[i]) || 8);
+        var rawHead = Number(heads[i]);
+        var hasHead = isFinite(rawHead) ? rawHead > 0 : true;
+        var head = hasHead ? Math.max(3, rawHead || 8) : 0;
         var sx = xSpan / box.plotWidth;
         var sy = ySpan / box.plotHeight;
-        var shaftEndX = x1 - tx * head * sx;
-        var shaftEndY = y1 - ty * head * sy;
+        var shaftEndX = hasHead ? x1 - tx * head * sx : x1;
+        var shaftEndY = hasHead ? y1 - ty * head * sy : y1;
         var ox = nx * halfWidth * sx;
         var oy = ny * halfWidth * sy;
         var hx = nx * head * 0.55 * sx;
@@ -3817,9 +6270,11 @@ HTMLWidgets.widget({
         pushVertex(x0 + ox, y0 + oy, r, g, b, a);
         pushVertex(shaftEndX + ox, shaftEndY + oy, r, g, b, a);
 
-        pushVertex(x1, y1, r, g, b, a);
-        pushVertex(shaftEndX + hx, shaftEndY + hy, r, g, b, a);
-        pushVertex(shaftEndX - hx, shaftEndY - hy, r, g, b, a);
+        if (hasHead) {
+          pushVertex(x1, y1, r, g, b, a);
+          pushVertex(shaftEndX + hx, shaftEndY + hy, r, g, b, a);
+          pushVertex(shaftEndX - hx, shaftEndY - hy, r, g, b, a);
+        }
       }
 
       return {
@@ -3833,7 +6288,7 @@ HTMLWidgets.widget({
     function drawVectorLayer(gl, programs, layer, x, viewport, box) {
       var payload = flattenVectorLayer(layer, x, viewport, box);
       var primitive = programs.primitive;
-      var drawViewport = sceneDimension(x) === "3d" ? { x: [-1.2, 1.2], y: [-1.2, 1.2] } : viewport;
+      var drawViewport = sceneDimension(x) === "3d" ? { x: [-1, 1], y: [-1, 1] } : viewport;
 
       if (!payload || payload.count < 3) {
         return;
@@ -3848,6 +6303,177 @@ HTMLWidgets.widget({
       var positionBuffer = bindPositionAttribute(gl, primitive, payload.positions);
       var ageBuffer = bindAgeAttribute(gl, primitive, payload.ages);
       var colorBuffer = bindColorAttribute(gl, primitive, payload.colors);
+      bindConstantMetricAttribute(gl, primitive);
+      gl.drawArrays(gl.TRIANGLES, 0, payload.count);
+      gl.deleteBuffer(positionBuffer);
+      gl.deleteBuffer(ageBuffer);
+      gl.deleteBuffer(colorBuffer);
+    }
+
+    function flattenRectLayer(layer, x) {
+      var n = layer.rows || 0;
+      var xmins = layer.xmin || [];
+      var xmaxs = layer.xmax || [];
+      var ymins = layer.ymin || [];
+      var ymaxs = layer.ymax || [];
+      var rgba = layer.rgba || [];
+      var positions = [];
+      var ages = [];
+      var colors = [];
+
+      function pushVertex(xValue, yValue, r, g, b, a) {
+        positions.push(xValue, yValue);
+        ages.push(1);
+        colors.push(r, g, b, a);
+      }
+
+      for (var i = 0; i < n; i += 1) {
+        if (!layerIndexVisible(layer, i, x)) {
+          continue;
+        }
+        var xmin = Number(xmins[i]);
+        var xmax = Number(xmaxs[i]);
+        var ymin = Number(ymins[i]);
+        var ymax = Number(ymaxs[i]);
+        if (!isFinite(xmin) || !isFinite(xmax) || !isFinite(ymin) || !isFinite(ymax) ||
+            xmin === xmax || ymin === ymax) {
+          continue;
+        }
+        var r = normalizeColorComponent(rgba[i * 4 + 0], 0.18);
+        var g = normalizeColorComponent(rgba[i * 4 + 1], 0.34);
+        var b = normalizeColorComponent(rgba[i * 4 + 2], 0.46);
+        var a = normalizeColorComponent(rgba[i * 4 + 3], 1);
+
+        // Rectangles are filled quads represented as two triangles in the
+        // primitive shader path. Stroke metadata is preserved in the layer but
+        // outline drawing is deferred to the future public rectangle geoms.
+        pushVertex(xmin, ymin, r, g, b, a);
+        pushVertex(xmax, ymin, r, g, b, a);
+        pushVertex(xmax, ymax, r, g, b, a);
+        pushVertex(xmin, ymin, r, g, b, a);
+        pushVertex(xmax, ymax, r, g, b, a);
+        pushVertex(xmin, ymax, r, g, b, a);
+      }
+
+      return {
+        count: ages.length,
+        positions: new Float32Array(positions),
+        ages: new Float32Array(ages),
+        colors: new Float32Array(colors)
+      };
+    }
+
+    function drawRectLayer(gl, programs, layer, x, viewport) {
+      var payload = flattenRectLayer(layer, x);
+      var primitive = programs.primitive;
+
+      if (!payload || payload.count < 3) {
+        return;
+      }
+
+      configurePrimitiveLayerShader(gl, primitive, x, "rects", viewport, layer);
+      if (primitive.attributes.size >= 0) {
+        gl.disableVertexAttribArray(primitive.attributes.size);
+        gl.vertexAttrib1f(primitive.attributes.size, 1.0);
+      }
+
+      var positionBuffer = bindPositionAttribute(gl, primitive, payload.positions);
+      var ageBuffer = bindAgeAttribute(gl, primitive, payload.ages);
+      var colorBuffer = bindColorAttribute(gl, primitive, payload.colors);
+      bindConstantMetricAttribute(gl, primitive);
+      gl.drawArrays(gl.TRIANGLES, 0, payload.count);
+      gl.deleteBuffer(positionBuffer);
+      gl.deleteBuffer(ageBuffer);
+      gl.deleteBuffer(colorBuffer);
+    }
+
+    function flattenRibbonLayer(layer, x) {
+      var strips = Array.isArray(layer.strips) ? layer.strips : [];
+      var positions = [];
+      var ages = [];
+      var colors = [];
+
+      function pushVertex(xValue, yValue, r, g, b, a) {
+        positions.push(xValue, yValue);
+        ages.push(1);
+        colors.push(r, g, b, a);
+      }
+
+      function pushStripVertex(strip, index) {
+        var rgba = strip.rgba || [];
+        return [
+          normalizeColorComponent(rgba[index * 4 + 0], 0.18),
+          normalizeColorComponent(rgba[index * 4 + 1], 0.34),
+          normalizeColorComponent(rgba[index * 4 + 2], 0.46),
+          normalizeColorComponent(rgba[index * 4 + 3], 0.7)
+        ];
+      }
+
+      strips.forEach(function(strip) {
+        var n = strip.rows || 0;
+        var xs = strip.x || [];
+        var ymins = strip.ymin || [];
+        var ymaxs = strip.ymax || [];
+
+        for (var i = 0; i < n - 1; i += 1) {
+          if (!pathSegmentVisible(strip, i, i + 1, x)) {
+            continue;
+          }
+
+          var x0 = Number(xs[i]);
+          var x1 = Number(xs[i + 1]);
+          var ymin0 = Number(ymins[i]);
+          var ymin1 = Number(ymins[i + 1]);
+          var ymax0 = Number(ymaxs[i]);
+          var ymax1 = Number(ymaxs[i + 1]);
+          if (!isFinite(x0) || !isFinite(x1) ||
+              !isFinite(ymin0) || !isFinite(ymin1) ||
+              !isFinite(ymax0) || !isFinite(ymax1) ||
+              x0 === x1 && ymin0 === ymin1 && ymax0 === ymax1) {
+            continue;
+          }
+
+          var c0 = pushStripVertex(strip, i);
+          var c1 = pushStripVertex(strip, i + 1);
+
+          // Ribbons are filled trapezoid strips, represented as two triangles
+          // per adjacent pair. Stroke metadata is preserved in the layer but
+          // outline drawing is deferred until a dedicated outline path exists.
+          pushVertex(x0, ymin0, c0[0], c0[1], c0[2], c0[3]);
+          pushVertex(x1, ymin1, c1[0], c1[1], c1[2], c1[3]);
+          pushVertex(x1, ymax1, c1[0], c1[1], c1[2], c1[3]);
+          pushVertex(x0, ymin0, c0[0], c0[1], c0[2], c0[3]);
+          pushVertex(x1, ymax1, c1[0], c1[1], c1[2], c1[3]);
+          pushVertex(x0, ymax0, c0[0], c0[1], c0[2], c0[3]);
+        }
+      });
+
+      return {
+        count: ages.length,
+        positions: new Float32Array(positions),
+        ages: new Float32Array(ages),
+        colors: new Float32Array(colors)
+      };
+    }
+
+    function drawRibbonLayer(gl, programs, layer, x, viewport) {
+      var payload = flattenRibbonLayer(layer, x);
+      var primitive = programs.primitive;
+
+      if (!payload || payload.count < 3) {
+        return;
+      }
+
+      configurePrimitiveLayerShader(gl, primitive, x, "ribbons", viewport, layer);
+      if (primitive.attributes.size >= 0) {
+        gl.disableVertexAttribArray(primitive.attributes.size);
+        gl.vertexAttrib1f(primitive.attributes.size, 1.0);
+      }
+
+      var positionBuffer = bindPositionAttribute(gl, primitive, payload.positions);
+      var ageBuffer = bindAgeAttribute(gl, primitive, payload.ages);
+      var colorBuffer = bindColorAttribute(gl, primitive, payload.colors);
+      bindConstantMetricAttribute(gl, primitive);
       gl.drawArrays(gl.TRIANGLES, 0, payload.count);
       gl.deleteBuffer(positionBuffer);
       gl.deleteBuffer(ageBuffer);
@@ -3864,73 +6490,172 @@ HTMLWidgets.widget({
       return [light[0] / len, light[1] / len, light[2] / len];
     }
 
-    function meshShade(layer, idx) {
+    function meshShadingMode(layer) {
+      var entry = shaderRegistryEntryForLayer(state.x || null, layer, "mesh");
+      if (entry && isFinite(Number(entry.mode))) {
+        return Number(entry.mode);
+      }
       var material = layer.material || {};
-      if (material.shading !== "lambert") {
+      var shading = String(material.shading || "mesh_lambert");
+      if (shading === "mesh_lambert" || shading === "lambert") {
         return 1;
       }
-      var normal = layer.normal || [];
-      var light = meshLightDirection(layer);
-      var nx = Number(normal[idx * 3 + 0]) || 0;
-      var ny = Number(normal[idx * 3 + 1]) || 0;
-      var nz = Number(normal[idx * 3 + 2]) || 1;
-      var len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-      var dot = Math.max(0, (nx / len) * light[0] + (ny / len) * light[1] + (nz / len) * light[2]);
-      var ambient = isFinite(Number(material.ambient)) ? Number(material.ambient) : 0.35;
-      var diffuse = isFinite(Number(material.diffuse)) ? Number(material.diffuse) : 0.75;
-      return Math.max(0, Math.min(1.5, ambient + diffuse * dot));
+      if (shading === "mesh_phong_simple") {
+        return 2;
+      }
+      if (shading === "mesh_scalar_colormap") {
+        return 3;
+      }
+      if (shading === "mesh_selection_highlight") {
+        return 4;
+      }
+      return 0;
     }
 
-    function flattenMeshLayer(layer, viewport) {
-      var xs = layer.x || [];
-      var ys = layer.y || [];
-      var zs = layer.z || [];
-      var indices = layer.indices || [];
-      var rgba = layer.rgba || [];
-      var positions = [];
-      var ages = [];
-      var colors = [];
-
-      for (var t = 0; t + 2 < indices.length; t += 3) {
-        for (var corner = 0; corner < 3; corner += 1) {
-          var idx = Number(indices[t + corner]);
-          if (!isFinite(idx) || idx < 0 || idx >= xs.length) {
-            continue;
+    function meshZRange(layer) {
+      var bbox = layer && layer.bbox3d ? layer.bbox3d : null;
+      var zMin = bbox && isFinite(Number(bbox.zmin)) ? Number(bbox.zmin) : Infinity;
+      var zMax = bbox && isFinite(Number(bbox.zmax)) ? Number(bbox.zmax) : -Infinity;
+      var zs = Array.isArray(layer && layer.z) ? layer.z : [];
+      if (!isFinite(zMin) || !isFinite(zMax)) {
+        zMin = Infinity;
+        zMax = -Infinity;
+        for (var i = 0; i < zs.length; i += 1) {
+          var z = Number(zs[i]);
+          if (isFinite(z)) {
+            zMin = Math.min(zMin, z);
+            zMax = Math.max(zMax, z);
           }
-          var point = project3dPoint(xs[idx], ys[idx], zs[idx] || 0, viewport, layer);
-          positions.push(point.x, point.y);
-          ages.push(1);
-          var shade = meshShade(layer, idx);
-          colors.push(
-            Math.min(1, normalizeColorComponent(rgba[idx * 4 + 0], 0.25) * shade),
-            Math.min(1, normalizeColorComponent(rgba[idx * 4 + 1], 0.55) * shade),
-            Math.min(1, normalizeColorComponent(rgba[idx * 4 + 2], 0.75) * shade),
-            normalizeColorComponent(rgba[idx * 4 + 3], 0.92)
-          );
         }
       }
+      if (!isFinite(zMin) || !isFinite(zMax)) {
+        return [-1, 1];
+      }
+      if (zMin === zMax) {
+        zMin -= 0.5;
+        zMax += 0.5;
+      }
+      return [zMin, zMax];
+    }
 
-      return {
-        count: ages.length,
-        positions: new Float32Array(positions),
-        ages: new Float32Array(ages),
-        colors: new Float32Array(colors)
-      };
+    function meshScalarRange(layer) {
+      var source = Array.isArray(layer && layer.scalar_range) ? layer.scalar_range.map(Number) : [];
+      if (source.length >= 2 && isFinite(source[0]) && isFinite(source[1]) && source[0] !== source[1]) {
+        return [source[0], source[1]];
+      }
+      var scalars = Array.isArray(layer && layer.scalar) ? layer.scalar : [];
+      var minValue = Infinity;
+      var maxValue = -Infinity;
+      for (var i = 0; i < scalars.length; i += 1) {
+        var value = Number(scalars[i]);
+        if (isFinite(value)) {
+          minValue = Math.min(minValue, value);
+          maxValue = Math.max(maxValue, value);
+        }
+      }
+      if (!isFinite(minValue) || !isFinite(maxValue)) {
+        return meshZRange(layer);
+      }
+      if (minValue === maxValue) {
+        minValue -= 0.5;
+        maxValue += 0.5;
+      }
+      return [minValue, maxValue];
     }
 
     function createMeshLayerGpuPayload(gl, programs, layer, viewport) {
-      var payload = flattenMeshLayer(layer, viewport);
-      if (!payload || payload.count < 3) {
+      var vertexCount = Math.floor(Number(layer.vertex_count) || 0);
+      var xs = Array.isArray(layer.x) ? layer.x : [];
+      var ys = Array.isArray(layer.y) ? layer.y : [];
+      var zs = Array.isArray(layer.z) ? layer.z : [];
+      var normals = Array.isArray(layer.normal) ? layer.normal : [];
+      var rgba = Array.isArray(layer.rgba) ? layer.rgba : [];
+      var scalars = Array.isArray(layer.scalar) ? layer.scalar : [];
+      var indices = layer.indices || [];
+      var wireIndices = Array.isArray(layer.wire_indices) ? layer.wire_indices : [];
+      var zRange = meshZRange(layer);
+      var normalizedPositions = [];
+      var normalizedNormals = [];
+      var normalizedColors = [];
+      var normalizedScalars = [];
+
+      if (!vertexCount || indices.length < 3) {
         return null;
       }
+
+      for (var i = 0; i < vertexCount; i += 1) {
+        var p = normalizePosition3(xs[i], ys[i], zs[i] || 0, viewport, zRange);
+        normalizedPositions.push(p[0], p[1], p[2]);
+        normalizedNormals.push(
+          isFinite(Number(normals[i * 3])) ? Number(normals[i * 3]) : 0,
+          isFinite(Number(normals[i * 3 + 1])) ? Number(normals[i * 3 + 1]) : 0,
+          isFinite(Number(normals[i * 3 + 2])) ? Number(normals[i * 3 + 2]) : 1
+        );
+        normalizedColors.push(
+          normalizeColorComponent(rgba[i * 4 + 0], 0.35),
+          normalizeColorComponent(rgba[i * 4 + 1], 0.55),
+          normalizeColorComponent(rgba[i * 4 + 2], 0.78),
+          normalizeColorComponent(rgba[i * 4 + 3], 0.92)
+        );
+        normalizedScalars.push(isFinite(Number(scalars[i])) ? Number(scalars[i]) : (isFinite(Number(zs[i])) ? Number(zs[i]) : 0));
+      }
+
+      var maxIndex = indices.reduce(function(maxValue, value) {
+        return Math.max(maxValue, Math.floor(Number(value)) || 0);
+      }, 0);
+      var uintExtension = maxIndex > 65535 ? gl.getExtension("OES_element_index_uint") : null;
+      var useUint = maxIndex > 65535 && !!uintExtension;
+      var canUseElements = maxIndex <= 65535 || useUint;
+
+      if (!canUseElements) {
+        var expandedPositions = [];
+        var expandedNormals = [];
+        var expandedColors = [];
+        var expandedScalars = [];
+        for (var ti = 0; ti < indices.length; ti += 1) {
+          var idx = Math.floor(Number(indices[ti])) || 0;
+          expandedPositions.push(
+            normalizedPositions[idx * 3],
+            normalizedPositions[idx * 3 + 1],
+            normalizedPositions[idx * 3 + 2]
+          );
+          expandedNormals.push(
+            normalizedNormals[idx * 3],
+            normalizedNormals[idx * 3 + 1],
+            normalizedNormals[idx * 3 + 2]
+          );
+          expandedColors.push(
+            normalizedColors[idx * 4],
+            normalizedColors[idx * 4 + 1],
+            normalizedColors[idx * 4 + 2],
+            normalizedColors[idx * 4 + 3]
+          );
+          expandedScalars.push(normalizedScalars[idx]);
+        }
+        el.ggwebglMeshIndexFallback = "uint_index_unavailable_expanded_arrays";
+        return {
+          expanded: true,
+          count: expandedScalars.length,
+          positionBuffer: createBuffer(gl, new Float32Array(expandedPositions)),
+          normalBuffer: createBuffer(gl, new Float32Array(expandedNormals)),
+          colorBuffer: createBuffer(gl, new Float32Array(expandedColors)),
+          scalarBuffer: createBuffer(gl, new Float32Array(expandedScalars)),
+          scalarRange: meshScalarRange(layer)
+        };
+      }
+
       return {
-        count: payload.count,
-        positionBuffer: createBuffer(gl, payload.positions),
-        ageBuffer: createBuffer(gl, payload.ages),
-        colorBuffer: createBuffer(gl, payload.colors),
-        uintExtension: gl.getExtension("OES_element_index_uint"),
-        indexType: payload.count > 65535 && gl.getExtension("OES_element_index_uint") ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
-        chunked: payload.count > 65535
+        expanded: false,
+        count: Math.floor(indices.length / 3) * 3,
+        indexType: useUint ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
+        positionBuffer: createBuffer(gl, new Float32Array(normalizedPositions)),
+        normalBuffer: createBuffer(gl, new Float32Array(normalizedNormals)),
+        colorBuffer: createBuffer(gl, new Float32Array(normalizedColors)),
+        scalarBuffer: createBuffer(gl, new Float32Array(normalizedScalars)),
+        indexBuffer: createElementBuffer(gl, useUint ? new Uint32Array(indices) : new Uint16Array(indices)),
+        wireIndexBuffer: wireIndices.length ? createElementBuffer(gl, useUint ? new Uint32Array(wireIndices) : new Uint16Array(wireIndices)) : null,
+        wireCount: wireIndices.length,
+        scalarRange: meshScalarRange(layer)
       };
     }
 
@@ -3938,7 +6663,14 @@ HTMLWidgets.widget({
       if (!payload) {
         return;
       }
-      [payload.positionBuffer, payload.ageBuffer, payload.colorBuffer].forEach(function(buffer) {
+      [
+        payload.positionBuffer,
+        payload.normalBuffer,
+        payload.colorBuffer,
+        payload.scalarBuffer,
+        payload.indexBuffer,
+        payload.wireIndexBuffer
+      ].forEach(function(buffer) {
         if (buffer) {
           gl.deleteBuffer(buffer);
         }
@@ -3951,7 +6683,9 @@ HTMLWidgets.widget({
         rotation: state.camera.rotation,
         target: state.camera.target,
         distance: state.camera.distance,
-        material: layer.material
+        material: layer.material,
+        scalar_range: layer.scalar_range,
+        wireframe: layer.wireframe
       });
       if (layer._meshGpuPayload && layer._meshGpuPayload.key === cameraKey) {
         return layer._meshGpuPayload;
@@ -3960,52 +6694,303 @@ HTMLWidgets.widget({
       var payload = createMeshLayerGpuPayload(gl, programs, layer, viewport);
       if (payload) {
         payload.key = cameraKey;
-        if (payload.chunked && !payload.uintExtension) {
-          el.ggwebglMeshIndexFallback = "uint_index_unavailable_chunked_arrays";
-        }
       }
       layer._meshGpuPayload = payload;
       return payload;
     }
 
-    function drawMeshLayer(gl, programs, layer, x, viewport) {
-      var payload = ensureMeshLayerGpuPayload(gl, programs, layer, viewport);
-      var primitive = programs.primitive;
+    function configureMeshProgram(gl, programInfo, x, matrix, layer, payload) {
+      var material = layer.material || {};
+      var light = meshLightDirection(layer);
+      var range = payload && payload.scalarRange ? payload.scalarRange : meshScalarRange(layer);
+      gl.useProgram(programInfo.program);
+      gl.uniformMatrix4fv(programInfo.uniforms.viewProjection, false, new Float32Array(matrix));
+      gl.uniform1f(programInfo.uniforms.shadingMode, meshShadingMode(layer));
+      gl.uniform3f(programInfo.uniforms.lightDir, light[0], light[1], light[2]);
+      gl.uniform2f(programInfo.uniforms.scalarRange, range[0], range[1]);
+      gl.uniform1f(programInfo.uniforms.ambient, isFinite(Number(material.ambient)) ? Number(material.ambient) : 0.35);
+      gl.uniform1f(programInfo.uniforms.diffuse, isFinite(Number(material.diffuse)) ? Number(material.diffuse) : 0.75);
+      gl.uniform1f(programInfo.uniforms.specular, isFinite(Number(material.specular)) ? Number(material.specular) : 0.25);
+      configurePrimitiveBlending(gl, x, 0, "mesh");
+    }
 
-      if (!payload || payload.count < 3) {
+    function drawMeshLayer(gl, programs, layer, x, viewport, box) {
+      var payload = ensureMeshLayerGpuPayload(gl, programs, layer, viewport);
+      var mesh = programs.mesh;
+
+      if (!payload || !mesh || !mesh.program || payload.count < 3) {
         return;
       }
 
-      configurePrimitiveLayerShader(gl, primitive, x, "mesh", { x: [-1.2, 1.2], y: [-1.2, 1.2] }, layer);
-      if (primitive.attributes.size >= 0) {
-        gl.disableVertexAttribArray(primitive.attributes.size);
-        gl.vertexAttrib1f(primitive.attributes.size, 1.0);
-      }
+      configureMeshProgram(gl, mesh, x, cameraViewProjectionMatrix(x, box), layer, payload);
+      bindAttributeBuffer(gl, mesh.attributes.position3, payload.positionBuffer, 3);
+      bindAttributeBuffer(gl, mesh.attributes.normal, payload.normalBuffer, 3);
+      bindAttributeBuffer(gl, mesh.attributes.color, payload.colorBuffer, 4);
+      bindAttributeBuffer(gl, mesh.attributes.scalar, payload.scalarBuffer, 1);
 
-      gl.enableVertexAttribArray(primitive.attributes.position);
-      gl.bindBuffer(gl.ARRAY_BUFFER, payload.positionBuffer);
-      gl.vertexAttribPointer(primitive.attributes.position, 2, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(primitive.attributes.age);
-      gl.bindBuffer(gl.ARRAY_BUFFER, payload.ageBuffer);
-      gl.vertexAttribPointer(primitive.attributes.age, 1, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(primitive.attributes.color);
-      gl.bindBuffer(gl.ARRAY_BUFFER, payload.colorBuffer);
-      gl.vertexAttribPointer(primitive.attributes.color, 4, gl.FLOAT, false, 0, 0);
       if (layer.material && layer.material.cull === "back") {
         gl.enable(gl.CULL_FACE);
         gl.cullFace(gl.BACK);
       } else {
         gl.disable(gl.CULL_FACE);
       }
-      gl.drawArrays(gl.TRIANGLES, 0, payload.count);
 
-      if (layer.wireframe) {
-        gl.drawArrays(gl.LINE_STRIP, 0, payload.count);
+      if (payload.expanded) {
+        gl.drawArrays(gl.TRIANGLES, 0, payload.count);
+      } else {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, payload.indexBuffer);
+        gl.drawElements(gl.TRIANGLES, payload.count, payload.indexType, 0);
+      }
+
+      if (layer.wireframe && payload.wireIndexBuffer && payload.wireCount > 0) {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, payload.wireIndexBuffer);
+        gl.drawElements(gl.LINES, payload.wireCount, payload.indexType, 0);
       }
       gl.disable(gl.CULL_FACE);
     }
 
-    function drawRasterLayer(gl, programs, layer, viewport) {
+    function surfaceShadingMode(layer) {
+      var entry = shaderRegistryEntryForLayer(state.x || null, layer, "surface");
+      if (entry && isFinite(Number(entry.mode))) {
+        return Number(entry.mode);
+      }
+      var shading = layer && layer.surface_meta ? String(layer.surface_meta.shading || "") : "";
+      if (shading === "surface_lambert") {
+        return 1;
+      }
+      if (shading === "surface_height_colormap") {
+        return 2;
+      }
+      if (shading === "surface_uncertainty_alpha") {
+        return 3;
+      }
+      return 0;
+    }
+
+    function surfaceZRange(layer) {
+      var source = layer && layer.surface_meta && Array.isArray(layer.surface_meta.z_range)
+        ? layer.surface_meta.z_range.map(Number)
+        : [];
+      if (source.length >= 2 && isFinite(source[0]) && isFinite(source[1]) && source[0] !== source[1]) {
+        return [source[0], source[1]];
+      }
+      var positions = layer && Array.isArray(layer.positions) ? layer.positions : [];
+      var zMin = Infinity;
+      var zMax = -Infinity;
+      for (var i = 2; i < positions.length; i += 3) {
+        var z = Number(positions[i]);
+        if (isFinite(z)) {
+          zMin = Math.min(zMin, z);
+          zMax = Math.max(zMax, z);
+        }
+      }
+      if (!isFinite(zMin) || !isFinite(zMax)) {
+        return [-1, 1];
+      }
+      if (zMin === zMax) {
+        zMin -= 0.5;
+        zMax += 0.5;
+      }
+      return [zMin, zMax];
+    }
+
+    function surfaceLightDir(layer) {
+      var source = layer && layer.material && Array.isArray(layer.material.light_dir)
+        ? layer.material.light_dir.map(Number)
+        : [0.35, 0.45, 0.82];
+      while (source.length < 3) {
+        source.push(source.length === 2 ? 1 : 0);
+      }
+      var len = Math.sqrt(source[0] * source[0] + source[1] * source[1] + source[2] * source[2]);
+      if (!(len > 0)) {
+        return [0.35, 0.45, 0.82];
+      }
+      return [source[0] / len, source[1] / len, source[2] / len];
+    }
+
+    function createSurfaceLayerGpuPayload(gl, layer, viewport) {
+      var vertexCount = Math.floor(Number(layer.vertex_count) || 0);
+      var positions = Array.isArray(layer.positions) ? layer.positions : [];
+      var normals = Array.isArray(layer.normals) ? layer.normals : [];
+      var colors = Array.isArray(layer.colors) ? layer.colors : [];
+      var uncertainty = Array.isArray(layer.uncertainty) ? layer.uncertainty : [];
+      var indices = Array.isArray(layer.indices) ? layer.indices : [];
+      var wireIndices = Array.isArray(layer.wire_indices) ? layer.wire_indices : [];
+      var zRange = surfaceZRange(layer);
+      var normalizedPositions = [];
+      var normalizedNormals = [];
+      var normalizedColors = [];
+      var normalizedUncertainty = [];
+
+      for (var i = 0; i < vertexCount; i += 1) {
+        var p = normalizePosition3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2], viewport, zRange);
+        normalizedPositions.push(p[0], p[1], p[2]);
+        normalizedNormals.push(
+          isFinite(Number(normals[i * 3])) ? Number(normals[i * 3]) : 0,
+          isFinite(Number(normals[i * 3 + 1])) ? Number(normals[i * 3 + 1]) : 0,
+          isFinite(Number(normals[i * 3 + 2])) ? Number(normals[i * 3 + 2]) : 1
+        );
+        normalizedColors.push(
+          normalizeColorComponent(colors[i * 4], 0.45),
+          normalizeColorComponent(colors[i * 4 + 1], 0.55),
+          normalizeColorComponent(colors[i * 4 + 2], 0.65),
+          normalizeColorComponent(colors[i * 4 + 3], 0.95)
+        );
+        normalizedUncertainty.push(normalizeColorComponent(uncertainty[i], 0));
+      }
+
+      var maxIndex = indices.reduce(function(maxValue, value) {
+        return Math.max(maxValue, Math.floor(Number(value)) || 0);
+      }, 0);
+      var uintExtension = maxIndex > 65535 ? gl.getExtension("OES_element_index_uint") : null;
+      var useUint = maxIndex > 65535 && !!uintExtension;
+      var canUseElements = maxIndex <= 65535 || useUint;
+      if (!canUseElements) {
+        var expandedPositions = [];
+        var expandedNormals = [];
+        var expandedColors = [];
+        var expandedUncertainty = [];
+        for (var ti = 0; ti < indices.length; ti += 1) {
+          var idx = Math.floor(Number(indices[ti])) || 0;
+          expandedPositions.push(
+            normalizedPositions[idx * 3],
+            normalizedPositions[idx * 3 + 1],
+            normalizedPositions[idx * 3 + 2]
+          );
+          expandedNormals.push(
+            normalizedNormals[idx * 3],
+            normalizedNormals[idx * 3 + 1],
+            normalizedNormals[idx * 3 + 2]
+          );
+          expandedColors.push(
+            normalizedColors[idx * 4],
+            normalizedColors[idx * 4 + 1],
+            normalizedColors[idx * 4 + 2],
+            normalizedColors[idx * 4 + 3]
+          );
+          expandedUncertainty.push(normalizedUncertainty[idx]);
+        }
+        el.ggwebglSurfaceIndexFallback = "uint_index_unavailable_expanded_arrays";
+        return {
+          expanded: true,
+          count: expandedUncertainty.length,
+          positionBuffer: createBuffer(gl, new Float32Array(expandedPositions)),
+          normalBuffer: createBuffer(gl, new Float32Array(expandedNormals)),
+          colorBuffer: createBuffer(gl, new Float32Array(expandedColors)),
+          uncertaintyBuffer: createBuffer(gl, new Float32Array(expandedUncertainty)),
+          zRange: zRange
+        };
+      }
+
+      return {
+        expanded: false,
+        count: Math.floor(indices.length / 3) * 3,
+        indexType: useUint ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
+        positionBuffer: createBuffer(gl, new Float32Array(normalizedPositions)),
+        normalBuffer: createBuffer(gl, new Float32Array(normalizedNormals)),
+        colorBuffer: createBuffer(gl, new Float32Array(normalizedColors)),
+        uncertaintyBuffer: createBuffer(gl, new Float32Array(normalizedUncertainty)),
+        indexBuffer: createElementBuffer(gl, useUint ? new Uint32Array(indices) : new Uint16Array(indices)),
+        wireIndexBuffer: wireIndices.length ? createElementBuffer(gl, useUint ? new Uint32Array(wireIndices) : new Uint16Array(wireIndices)) : null,
+        wireCount: wireIndices.length,
+        zRange: zRange
+      };
+    }
+
+    function disposeSurfaceLayerGpuPayload(gl, payload) {
+      if (!payload || !gl) {
+        return;
+      }
+      [
+        payload.positionBuffer,
+        payload.normalBuffer,
+        payload.colorBuffer,
+        payload.uncertaintyBuffer,
+        payload.indexBuffer,
+        payload.wireIndexBuffer
+      ].forEach(function(buffer) {
+        if (buffer) {
+          gl.deleteBuffer(buffer);
+        }
+      });
+    }
+
+    function ensureSurfaceLayerGpuPayload(gl, layer, viewport) {
+      var key = JSON.stringify({
+        viewport: viewport,
+        positions: layer.positions && layer.positions.length,
+        indices: layer.indices && layer.indices.length,
+        shading: layer.surface_meta && layer.surface_meta.shading,
+        wireframe: layer.wireframe
+      });
+      if (layer._surfaceGpuPayload && layer._surfaceGpuPayload.key === key) {
+        return layer._surfaceGpuPayload;
+      }
+      disposeSurfaceLayerGpuPayload(gl, layer._surfaceGpuPayload);
+      var payload = createSurfaceLayerGpuPayload(gl, layer, viewport);
+      if (payload) {
+        payload.key = key;
+      }
+      layer._surfaceGpuPayload = payload;
+      return payload;
+    }
+
+    function configureSurfaceProgram(gl, programInfo, x, matrix, layer, payload) {
+      var light = surfaceLightDir(layer);
+      var zRange = payload && payload.zRange ? payload.zRange : surfaceZRange(layer);
+      gl.useProgram(programInfo.program);
+      gl.uniformMatrix4fv(programInfo.uniforms.viewProjection, false, new Float32Array(matrix));
+      gl.uniform1f(programInfo.uniforms.shadingMode, surfaceShadingMode(layer));
+      gl.uniform3f(programInfo.uniforms.lightDir, light[0], light[1], light[2]);
+      gl.uniform2f(programInfo.uniforms.zRange, zRange[0], zRange[1]);
+      configurePrimitiveBlending(gl, x, 0, "surface");
+    }
+
+    function drawSurfaceLayer(gl, programs, layer, scene, panel, viewport, box) {
+      var payload = ensureSurfaceLayerGpuPayload(gl, layer, viewport);
+      var surface = programs.surface;
+      if (!payload || !surface || !surface.program || payload.count < 3) {
+        return;
+      }
+
+      configureSurfaceProgram(gl, surface, scene, cameraViewProjectionMatrix(scene, box), layer, payload);
+      bindAttributeBuffer(gl, surface.attributes.position3, payload.positionBuffer, 3);
+      bindAttributeBuffer(gl, surface.attributes.normal, payload.normalBuffer, 3);
+      bindAttributeBuffer(gl, surface.attributes.color, payload.colorBuffer, 4);
+      bindAttributeBuffer(gl, surface.attributes.uncertainty, payload.uncertaintyBuffer, 1);
+
+      if (layer.material && layer.material.cull === "back") {
+        gl.enable(gl.CULL_FACE);
+        gl.cullFace(gl.BACK);
+      } else {
+        gl.disable(gl.CULL_FACE);
+      }
+
+      if (payload.expanded) {
+        gl.drawArrays(gl.TRIANGLES, 0, payload.count);
+      } else {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, payload.indexBuffer);
+        gl.drawElements(gl.TRIANGLES, payload.count, payload.indexType, 0);
+      }
+
+      if (layer.wireframe && payload.wireIndexBuffer && payload.wireCount > 0) {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, payload.wireIndexBuffer);
+        gl.drawElements(gl.LINES, payload.wireCount, payload.indexType, 0);
+      }
+
+      gl.disable(gl.CULL_FACE);
+
+      if (Array.isArray(layer.contours) && layer.contours.length) {
+        drawLineLayer(gl, programs, {
+          type: "lines",
+          rows: layer.contours.reduce(function(total, path) { return total + path.rows; }, 0),
+          path_count: layer.contours.length,
+          paths: layer.contours
+        }, scene, viewport, box);
+      }
+    }
+
+    function drawRasterLayer(gl, programs, layer, scene, viewport) {
       var payload = flattenRasterLayer(layer);
 
       if (!payload.width || !payload.height || !payload.pixels.length) {
@@ -4025,7 +7010,7 @@ HTMLWidgets.widget({
         1, 1
       ]);
 
-      configureRasterProgram(gl, programs.raster, viewport);
+      configureRasterProgram(gl, programs.raster, viewport, scene, layer);
       var positionBuffer = bindPositionAttribute(gl, programs.raster, positions);
       var texcoordBuffer = bindTexcoordAttribute(gl, programs.raster, texcoords);
       var texture = gl.createTexture();
@@ -4056,11 +7041,83 @@ HTMLWidgets.widget({
       gl.deleteBuffer(texcoordBuffer);
     }
 
+    function getProgramForLayer(programRegistry, layer, material, scene) {
+      if (window.ggWebGLProgramRegistry &&
+          typeof window.ggWebGLProgramRegistry.getProgramForLayer === "function") {
+        return window.ggWebGLProgramRegistry.getProgramForLayer(programRegistry, layer, material, scene);
+      }
+      if (layer && layer.type === "raster") {
+        return programRegistry.raster;
+      }
+      if (layer && layer.type === "surface") {
+        return programRegistry.surface;
+      }
+      if (layer && layer.type === "mesh") {
+        return programRegistry.mesh;
+      }
+      return programRegistry.primitive;
+    }
+
+    function drawPointsLayer(gl, programs, layer, scene, panel, viewport, box) {
+      drawPointLayer(gl, programs, layer, scene, viewport, box);
+    }
+
+    function drawLinesLayer(gl, programs, layer, scene, panel, viewport, box) {
+      drawLineLayer(gl, programs, layer, scene, viewport, box);
+    }
+
+    function drawRasterLayerTyped(gl, programs, layer, scene, panel, viewport, box) {
+      drawRasterLayer(gl, programs, layer, scene, viewport);
+    }
+
+    function drawVectorsLayer(gl, programs, layer, scene, panel, viewport, box) {
+      drawVectorLayer(gl, programs, layer, scene, viewport, box);
+    }
+
+    function drawRectsLayer(gl, programs, layer, scene, panel, viewport, box) {
+      drawRectLayer(gl, programs, layer, scene, viewport);
+    }
+
+    function drawRibbonsLayer(gl, programs, layer, scene, panel, viewport, box) {
+      drawRibbonLayer(gl, programs, layer, scene, viewport);
+    }
+
+    function drawMeshLayerTyped(gl, programs, layer, scene, panel, viewport, box) {
+      drawMeshLayer(gl, programs, layer, scene, viewport, box);
+    }
+
+    function drawLayer(gl, programs, layer, scene, panel, viewport, box) {
+      var programInfo = getProgramForLayer(programs, layer, layer && layer.material, scene);
+      if (!programInfo) {
+        return;
+      }
+      if (!layer || !layer.type) {
+        return;
+      }
+      if (layer.type === "raster") {
+        drawRasterLayerTyped(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "lines") {
+        drawLinesLayer(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "vectors") {
+        drawVectorsLayer(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "rects") {
+        drawRectsLayer(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "ribbons") {
+        drawRibbonsLayer(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "mesh") {
+        drawMeshLayerTyped(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "surface") {
+        drawSurfaceLayer(gl, programs, layer, scene, panel, viewport, box);
+      } else if (layer.type === "points") {
+        drawPointsLayer(gl, programs, layer, scene, panel, viewport, box);
+      }
+    }
+
     function drawScene(x) {
       var panels = panelList(x);
 
       if (!panels.length) {
-        setEmpty("No supported point, line, raster, vector, or mesh layers are available for rendering yet.");
+        setEmpty("No supported point, line, raster, vector, rectangle, ribbon, mesh, or surface layers are available for rendering yet.");
         return;
       }
 
@@ -4091,7 +7148,14 @@ HTMLWidgets.widget({
       gl.disable(gl.SCISSOR_TEST);
       gl.viewport(0, 0, state.canvas.width, state.canvas.height);
 	  gl.clearColor(1.0, 1.0, 1.0, 1.0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+      if (depthTestEnabled(x)) {
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.clearDepth(1.0);
+      } else {
+        gl.disable(gl.DEPTH_TEST);
+      }
+      gl.clear(depthTestEnabled(x) ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT) : gl.COLOR_BUFFER_BIT);
       gl.enable(gl.BLEND);
 
       boxes.forEach(function(box) {
@@ -4105,19 +7169,12 @@ HTMLWidgets.widget({
         gl.enable(gl.SCISSOR_TEST);
         gl.scissor(scissorX, scissorY, scissorWidth, scissorHeight);
         gl.viewport(scissorX, scissorY, scissorWidth, scissorHeight);
+        if (depthTestEnabled(x)) {
+          gl.clear(gl.DEPTH_BUFFER_BIT);
+        }
 
         (panel.layers || []).forEach(function(layer) {
-          if (layer.type === "raster") {
-            drawRasterLayer(gl, programs, layer, viewport);
-          } else if (layer.type === "lines") {
-            drawLineLayer(gl, programs, layer, x, viewport, box);
-          } else if (layer.type === "vectors") {
-            drawVectorLayer(gl, programs, layer, x, viewport, box);
-          } else if (layer.type === "mesh") {
-            drawMeshLayer(gl, programs, layer, x, viewport);
-          } else if (layer.type === "points") {
-            drawPointLayer(gl, programs, layer, x, viewport);
-          }
+          drawLayer(gl, programs, layer, x, panel, viewport, box);
         });
         drawSelectionHighlights(gl, programs, x, panel, viewport);
       });
@@ -4134,25 +7191,25 @@ HTMLWidgets.widget({
         state.x = next;
         state.selection.active = false;
         state.selection.result = null;
+        state.timeline = createTimelineState(next, state.timeline);
+        registerShinyTimelineHandler();
         applyWidgetSize(width, height);
         resetViewport(null);
         initialiseCameraFromScene(next);
-        var values = timelineValues(next);
-        state.timeline.frame = values.length ? values[0] : null;
-        state.timeline.playing = !!(next.render.timeline && next.render.timeline.autoplay);
-        
-		requestAnimationFrame(function() {
-    	  redrawCurrent();
+        redrawCurrent();
+
+        requestAnimationFrame(function() {
+          redrawCurrent();
           scheduleTimelineTick();
-	    });
+        });
       },
 
       resize: function(newWidth, newHeight) {
-	  applyWidgetSize(newWidth, newHeight);
+        applyWidgetSize(newWidth, newHeight);
 
-		requestAnimationFrame(function() {
-    	  redrawCurrent();
-	    });
+        requestAnimationFrame(function() {
+          redrawCurrent();
+        });
       }
     };
   }

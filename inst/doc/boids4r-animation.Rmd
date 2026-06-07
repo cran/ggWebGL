@@ -8,26 +8,23 @@ vignette: >
 ---
 
 ```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
-if (file.exists("../DESCRIPTION") && requireNamespace("pkgload", quietly = TRUE)) {
-  pkgload::load_all("..", export_all = FALSE, helpers = FALSE, quiet = TRUE)
-} else {
-  library(ggWebGL)
-}
+knitr::opts_knit$set(purl = FALSE)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 ```
 
 # Swarm Art in the Browser
 
-This article documents an optional downstream bridge from `boids4R` into
-`ggWebGL`. The creative use case is generative browser art: compact schools,
-predator avoidance, obstacle corridors, murmurations, and mixed-species swarms
-become animated point/vector timelines that can be panned, zoomed, scrubbed, and
-inspected in WebGL.
+`ggWebGL` can render swarm art in the browser from renderer-neutral `boids4R`
+simulations. Compact schools, predator avoidance, obstacle corridors,
+murmurations, and mixed-species flocks become animated point/vector timelines
+that can be panned, zoomed, scrubbed, and inspected in WebGL.
 
-The CRAN-built vignette is documentation-only. It does not load `boids4R`, does
-not execute GitHub-only package code, and does not require optional ecosystem
-packages to be installed. The runnable bridge remains in the package example
-script named below.
+The live examples are split across smaller articles so the generated pkgdown
+HTML files stay below repository hosting limits. The examples remain opt-in:
+live WebGL widgets are disabled during CRAN, package checks, and CI. Rich local
+or pkgdown rendering requires both
+`GGWEBGL_EVAL_COVERAGE_VIGNETTE=true` and
+`GGWEBGL_EVAL_LIVE_WIDGETS=true`.
 
 # Boundary
 
@@ -35,54 +32,44 @@ The ownership split is deliberately narrow:
 
 - `boids4R` owns simulation semantics: flocking state, rules, scenarios, and
   frame export.
-- The optional downstream bridge translates simulation frames into renderer
-  primitives when `boids4R` is installed separately.
+- `boids4R::as_ggwebgl_spec()` translates simulation frames into renderer
+  primitives and owns boid display defaults.
 - `ggWebGL` owns WebGL rendering: the htmlwidget, point and vector primitives,
   shader choice, timeline controls, hover, pan, zoom, and 3D orbit interaction.
 
-This keeps the core `ggWebGL` package self-contained for CRAN while preserving a
-clear optional integration path for development installations.
+`boids4R` is a suggested package for `ggWebGL`. When it is unavailable, the
+split articles still build and report that live animation widgets were skipped.
 
-# Runnable Optional Demo
-
-The optional example script is:
-
-```text
-inst/examples/htmlwidget/downstream-boids4r-animation.R
+```{r optional-boids4r-guard, eval = FALSE}
+boids4r_available <- requireNamespace("boids4R", quietly = TRUE)
+if (!boids4r_available) {
+  cat("boids4R is unavailable, so live boids animations are skipped.\n")
+}
 ```
 
-When `boids4R` is installed separately, the script builds two widgets:
+# Split Articles
 
-- a 2D schooling scene rendered as exact-frame animated points and vectors
-- a 3D murmuration scene rendered with the structured 3D view path
+- [2D swarm scenarios](boids4r-scenarios-2d.html): schooling, obstacle corridor,
+  and predator avoidance examples.
+- [3D swarm scenarios](boids4r-scenarios-3d.html): murmuration and mixed-species
+  3D examples with orbit camera interaction.
+- [Custom corridor workflow](boids4r-custom-workflow.html): a low-level
+  `boids4R` construction comparing baseline and stronger avoidance parameters.
 
-To run it in a development checkout or installed package, use:
+# Regeneration
 
-```text
-source(system.file("examples", "htmlwidget", "downstream-boids4r-animation.R", package = "ggWebGL"))
-widgets <- downstream_boids4r_widgets()
-widgets$schooling_2d
-widgets$murmuration_3d
+The same pattern can be used from an installed package:
+
+```{r eval = FALSE}
+sim <- boids4R::boids_scenario("mixed_species_3d", n = 210, steps = 240, seed = 115)
+spec <- ggWebGL:::ggwebgl_boids_display_spec(
+  sim,
+  vector_mode = "current",
+  vector_colour_mode = "species",
+  obstacle_mode = "ring",
+  trail = "recent",
+  trail_length = 32,
+  shader = "default"
+)
+ggWebGL::ggWebGL(spec, height = 540)
 ```
-
-The script is guarded: if `boids4R` is absent, it reports that the optional demo
-was skipped instead of failing package checks.
-
-# What To Inspect
-
-The optional widgets are intended to demonstrate renderer capabilities rather
-than package-specific simulation interpretation:
-
-- point primitives carry boid positions for each frame
-- vector primitives show local velocity direction
-- exact timeline filtering makes each scrubbed frame visually distinct
-- 3D view metadata enables the murmuration scene to use browser camera controls
-- shader settings remain owned by `ggWebGL`, not by the simulation package
-
-# CRAN Position
-
-`boids4R` is an optional development ecosystem package. It is not listed in
-`ggWebGL` dependencies and is not required for installation, examples, tests, or
-vignettes. This article is retained as a documentation entry so downstream
-packages can see the intended adapter boundary without making CRAN checks depend
-on GitHub-only packages.

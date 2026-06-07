@@ -56,13 +56,73 @@ test_that("publication rendering defaults and explicit overrides are normalized"
 })
 
 test_that("WebGL geoms use distinct geom classes", {
+  bar_layer <- geom_bar_webgl()
+  bin2d_layer <- geom_bin2d_webgl()
+  freqpoly_layer <- geom_freqpoly_webgl()
+  density_layer <- geom_density_webgl()
+  density2d_layer <- geom_density2d_webgl()
+  contour_layer <- geom_contour_webgl()
+  ribbon_layer <- geom_ribbon_webgl()
+  area_layer <- geom_area_webgl()
+  polygon_layer <- geom_polygon_webgl()
+  text_layer <- geom_text_webgl()
+  label_layer <- geom_label_webgl()
+  rug_layer <- geom_rug_webgl()
+  violin_layer <- geom_violin_webgl()
+  linerange_layer <- geom_linerange_webgl()
+  errorbar_layer <- geom_errorbar_webgl()
+  pointrange_layer <- geom_pointrange_webgl()
+  crossbar_layer <- geom_crossbar_webgl()
+  boxplot_layer <- geom_boxplot_webgl()
   point_layer <- geom_point_webgl()
   line_layer <- geom_line_webgl()
+  path_layer <- geom_path_webgl()
   raster_layer <- geom_raster_webgl()
+  rect_layer <- geom_rect_webgl()
+  tile_layer <- geom_tile_webgl()
+  histogram_layer <- geom_histogram_webgl()
+  segment_layer <- geom_segment_webgl()
 
+  expect_equal(class(bar_layer$geom)[1], "GeomBarWebGL")
+  expect_equal(class(bin2d_layer$geom)[1], "GeomBin2dWebGL")
+  expect_equal(class(bin2d_layer$stat)[1], "StatBin2d")
+  expect_equal(class(freqpoly_layer$geom)[1], "GeomFreqpolyWebGL")
+  expect_equal(class(freqpoly_layer$stat)[1], "StatBin")
+  expect_equal(class(density_layer$geom)[1], "GeomDensityWebGL")
+  expect_equal(class(density_layer$stat)[1], "StatDensity")
+  expect_equal(class(density2d_layer$geom)[1], "GeomDensity2dWebGL")
+  expect_equal(class(density2d_layer$stat)[1], "StatDensity2d")
+  expect_equal(class(contour_layer$geom)[1], "GeomContourWebGL")
+  expect_equal(class(contour_layer$stat)[1], "StatContour")
+  expect_equal(class(ribbon_layer$geom)[1], "GeomRibbonWebGL")
+  expect_equal(class(ribbon_layer$stat)[1], "StatIdentity")
+  expect_equal(class(area_layer$geom)[1], "GeomAreaWebGL")
+  expect_equal(class(area_layer$stat)[1], "StatAlign")
+  expect_equal(class(polygon_layer$geom)[1], "GeomPolygonWebGL")
+  expect_equal(class(polygon_layer$stat)[1], "StatIdentity")
+  expect_equal(class(text_layer$geom)[1], "GeomTextWebGL")
+  expect_equal(class(text_layer$stat)[1], "StatIdentity")
+  expect_equal(class(label_layer$geom)[1], "GeomLabelWebGL")
+  expect_equal(class(label_layer$stat)[1], "StatIdentity")
+  expect_equal(class(rug_layer$geom)[1], "GeomRugWebGL")
+  expect_equal(class(rug_layer$stat)[1], "StatIdentity")
+  expect_equal(class(violin_layer$geom)[1], "GeomViolinWebGL")
+  expect_equal(class(violin_layer$stat)[1], "StatYdensity")
+  expect_equal(class(linerange_layer$geom)[1], "GeomLinerangeWebGL")
+  expect_equal(class(errorbar_layer$geom)[1], "GeomErrorbarWebGL")
+  expect_equal(class(pointrange_layer$geom)[1], "GeomPointrangeWebGL")
+  expect_equal(class(crossbar_layer$geom)[1], "GeomCrossbarWebGL")
+  expect_equal(class(boxplot_layer$geom)[1], "GeomBoxplotWebGL")
+  expect_equal(class(boxplot_layer$stat)[1], "StatBoxplot")
   expect_equal(class(point_layer$geom)[1], "GeomPointWebGL")
   expect_equal(class(line_layer$geom)[1], "GeomLineWebGL")
+  expect_equal(class(path_layer$geom)[1], "GeomPathWebGL")
   expect_equal(class(raster_layer$geom)[1], "GeomRasterWebGL")
+  expect_equal(class(rect_layer$geom)[1], "GeomRectWebGL")
+  expect_equal(class(tile_layer$geom)[1], "GeomTileWebGL")
+  expect_equal(class(histogram_layer$geom)[1], "GeomBarWebGL")
+  expect_equal(class(histogram_layer$stat)[1], "StatBin")
+  expect_equal(class(segment_layer$geom)[1], "GeomSegmentWebGL")
 })
 
 test_that("ggplot_webgl creates a canonical single-panel point payload", {
@@ -104,6 +164,29 @@ test_that("ggplot_webgl creates a canonical single-panel point payload", {
   expect_equal(widget$x[["layers"]][[1]][["geom"]], "GeomPointWebGL")
 })
 
+test_that("point layers serialize missing coordinates without corrupting payload shape", {
+  df <- data.frame(
+    x = c(1, 2, NA, 4),
+    y = c(1, NA, 3, 4),
+    id = paste0("p", 1:4)
+  )
+
+  widget <- ggplot_webgl(
+    ggplot2::ggplot(df, ggplot2::aes(x, y, label = id)) +
+      geom_point_webgl(colour = "#2563eb", alpha = 0.8) +
+      theme_webgl()
+  )
+  layer <- widget$x$render$layers[[1L]]
+
+  expect_equal(layer$type, "points")
+  expect_equal(layer$rows, nrow(df))
+  expect_equal(widget$x$render$point_count, nrow(df))
+  expect_true(any(is.na(layer$x)))
+  expect_true(any(is.na(layer$y)))
+  expect_equal(length(layer$rgba), nrow(df) * 4L)
+  expect_equal(layer$label, df$id)
+})
+
 test_that("line layers are serialised into a WebGL render plan", {
   df <- data.frame(
     x = c(1, 2, 3, 1, 2, 3),
@@ -126,6 +209,28 @@ test_that("line layers are serialised into a WebGL render plan", {
   expect_equal(layer[["type"]], "lines")
   expect_length(layer[["paths"]], 2L)
   expect_equal(range(layer[["paths"]][[1]][["age"]]), c(0, 1))
+})
+
+test_that("line layers omit missing coordinates while preserving group breaks", {
+  df <- data.frame(
+    x = c(1, 2, NA, 3, 4, 1, NA, 2, 3),
+    y = c(1, 2, 3, 3, 4, 1, 2, 2, 3),
+    g = c(rep("a", 5), rep("b", 4))
+  )
+
+  widget <- ggplot_webgl(
+    ggplot2::ggplot(df, ggplot2::aes(x, y, group = g, colour = g)) +
+      geom_line_webgl() +
+      theme_webgl()
+  )
+  layer <- widget$x$render$layers[[1L]]
+  path_rows <- unname(vapply(layer$paths, `[[`, integer(1), "rows"))
+
+  expect_equal(layer$type, "lines")
+  expect_equal(layer$path_count, 2L)
+  expect_equal(layer$rows, sum(stats::complete.cases(df[c("x", "y")])))
+  expect_equal(path_rows, c(4L, 3L))
+  expect_true(all(vapply(layer$paths, function(path) all(is.finite(path$x) & is.finite(path$y)), logical(1))))
 })
 
 test_that("unsupported non-WebGL layers stay explicit in the render plan", {
@@ -165,6 +270,27 @@ test_that("raster-only plots render in WebGL mode", {
   expect_equal(layer[["height"]], 4L)
   expect_true(layer[["interpolate"]])
   expect_equal(length(layer[["rgba"]]), nrow(grid) * 4L)
+})
+
+test_that("raster layers tolerate missing fill values without changing the cell grid", {
+  grid <- expand.grid(x = 1:3, y = 1:2)
+  grid$z <- seq_len(nrow(grid))
+  grid$z[2L] <- NA_real_
+
+  widget <- ggplot_webgl(
+    ggplot2::ggplot(grid, ggplot2::aes(x, y, fill = z)) +
+      geom_raster_webgl(interpolate = FALSE) +
+      theme_webgl()
+  )
+  layer <- widget$x$render$layers[[1L]]
+
+  expect_equal(layer$type, "raster")
+  expect_equal(layer$rows, nrow(grid))
+  expect_equal(layer$width, 3L)
+  expect_equal(layer$height, 2L)
+  expect_equal(widget$x$render$raster_cell_count, nrow(grid))
+  expect_equal(length(layer$rgba), nrow(grid) * 4L)
+  expect_true(all(is.finite(layer$rgba)))
 })
 
 test_that("raster interpolate metadata is preserved", {

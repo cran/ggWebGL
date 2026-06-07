@@ -293,6 +293,96 @@ ggwebgl_layer_vectors <- function(data,
   ))
 }
 
+ggwebgl_layer_rects <- function(data = NULL,
+                                xmin = NULL,
+                                xmax = NULL,
+                                ymin = NULL,
+                                ymax = NULL,
+                                fill = NULL,
+                                colour = NULL,
+                                rgba = NULL,
+                                alpha = NULL,
+                                linewidth = NULL,
+                                count = NULL,
+                                density = NULL,
+                                frame = NULL,
+                                time = NULL,
+                                panel_id = 1L,
+                                geom = "adapter_rects") {
+  data <- ggwebgl_adapter_data(data)
+  env <- parent.frame()
+  xmins <- ggwebgl_resolve_arg(data, substitute(xmin), env, "xmin", required = TRUE)
+  xmaxs <- ggwebgl_resolve_arg(data, substitute(xmax), env, "xmax", required = TRUE)
+  ymins <- ggwebgl_resolve_arg(data, substitute(ymin), env, "ymin", required = TRUE)
+  ymaxs <- ggwebgl_resolve_arg(data, substitute(ymax), env, "ymax", required = TRUE)
+  n <- ggwebgl_rect_common_length(xmin = xmins, xmax = xmaxs, ymin = ymins, ymax = ymaxs)
+
+  xmins <- ggwebgl_recycle(xmins, n, "xmin")
+  xmaxs <- ggwebgl_recycle(xmaxs, n, "xmax")
+  ymins <- ggwebgl_recycle(ymins, n, "ymin")
+  ymaxs <- ggwebgl_recycle(ymaxs, n, "ymax")
+
+  xmins <- unname(as.numeric(xmins))
+  xmaxs <- unname(as.numeric(xmaxs))
+  ymins <- unname(as.numeric(ymins))
+  ymaxs <- unname(as.numeric(ymaxs))
+
+  if (any(!is.finite(c(xmins, xmaxs, ymins, ymaxs)))) {
+    rlang::abort("Rectangle bounds must be finite numeric values.")
+  }
+  if (any(xmins > xmaxs) || any(ymins > ymaxs)) {
+    rlang::abort("Rectangle bounds must satisfy `xmin <= xmax` and `ymin <= ymax`.")
+  }
+
+  fill_values <- ggwebgl_resolve_arg(data, substitute(fill), env, "fill", default = NULL)
+  colour_values <- ggwebgl_resolve_arg(data, substitute(colour), env, "colour", default = NULL)
+  rgba_values <- ggwebgl_resolve_arg(data, substitute(rgba), env, "rgba", default = NULL)
+  alpha_values <- ggwebgl_resolve_arg(data, substitute(alpha), env, "alpha", default = NULL)
+  linewidth_values <- ggwebgl_resolve_arg(data, substitute(linewidth), env, "linewidth", default = NULL)
+  count_values <- ggwebgl_resolve_arg(data, substitute(count), env, "count", default = NULL)
+  density_values <- ggwebgl_resolve_arg(data, substitute(density), env, "density", default = NULL)
+  frame_values <- ggwebgl_resolve_arg(data, substitute(frame), env, "frame", default = NULL)
+  time_values <- ggwebgl_resolve_arg(data, substitute(time), env, "time", default = NULL)
+
+  rgba_matrix <- if (n) {
+    ggwebgl_resolve_rgba(rgba_values, fill_values, alpha_values, n)
+  } else {
+    matrix(numeric(), ncol = 4L)
+  }
+  stroke_matrix <- if (!is.null(colour_values) && n) {
+    ggwebgl_resolve_rgba(NULL, colour_values, alpha_values, n)
+  } else {
+    NULL
+  }
+  linewidth_values <- ggwebgl_recycle(linewidth_values %||% if (!is.null(stroke_matrix)) 1 else 0, n, "linewidth")
+  count_values <- if (is.null(count_values)) NULL else as.numeric(ggwebgl_recycle(count_values, n, "count"))
+  density_values <- if (is.null(density_values)) NULL else as.numeric(ggwebgl_recycle(density_values, n, "density"))
+  frame_values <- if (is.null(frame_values)) NULL else as.integer(ggwebgl_recycle(frame_values, n, "frame"))
+  time_values <- if (is.null(time_values)) NULL else as.numeric(ggwebgl_recycle(time_values, n, "time"))
+
+  # Internal rectangle payloads are first-class `rects` primitives. The current
+  # renderer draws filled quads as two triangles; stroke metadata is serialized
+  # now so later public rectangle geoms can add outline rendering without a
+  # payload contract change.
+  compact_list(list(
+    panel_id = ggwebgl_panel_id(panel_id),
+    type = "rects",
+    geom = as.character(geom)[[1L]],
+    rows = as.integer(n),
+    xmin = xmins,
+    xmax = xmaxs,
+    ymin = ymins,
+    ymax = ymaxs,
+    linewidth = unname(as.numeric(linewidth_values)),
+    count = unname(count_values),
+    density = unname(density_values),
+    frame = unname(frame_values),
+    time = unname(time_values),
+    rgba = unname(as.numeric(t(rgba_matrix))),
+    stroke_rgba = if (is.null(stroke_matrix)) NULL else unname(as.numeric(t(stroke_matrix)))
+  ))
+}
+
 #' Renderer-Ready Raster Layer
 #'
 #' Build a normalized raster layer from RGBA byte payloads.
@@ -362,205 +452,10 @@ ggwebgl_layer_raster <- function(rgba,
   ))
 }
 
-#' Renderer-Ready Mesh Layer
-#'
-#' Build an indexed triangle mesh layer for downstream adapters.
-#' Triangle indices are supplied as one-based R indices and normalized to
-#' zero-based WebGL indices in the returned payload.
-#'
-#' @inheritParams ggwebgl_layer_points
-#' @param vertices Data frame supplying vertex coordinates.
-#' @param z Optional z coordinate vector or column name. Defaults to zero.
-#' @param triangles Optional data frame supplying triangle index columns.
-#' @param i,j,k One-based triangle index vectors or column names.
-#' @param normals Optional vertex-normal matrix/data frame/vector or `"auto"`.
-#' @param material Mesh material created by [ggwebgl_material()].
-#' @param pick_id Optional face picking ids. Length must be one or the number of
-#'   triangles.
-#' @param wireframe Legacy shortcut for `material$wireframe`.
-#'
-#' @return A normalized mesh layer list.
-#'
-#' @examples
-#' vertices <- data.frame(x = c(0, 1, 0), y = c(0, 0, 1), z = c(0, 0, 0))
-#' triangles <- data.frame(i = 1L, j = 2L, k = 3L)
-#' ggwebgl_layer_mesh(vertices, x = "x", y = "y", z = "z", triangles = triangles)
-#' @export
-ggwebgl_layer_mesh <- function(vertices,
-                               x,
-                               y,
-                               z = NULL,
-                               triangles = NULL,
-                               i = NULL,
-                               j = NULL,
-                               k = NULL,
-                               colour = NULL,
-                               rgba = NULL,
-                               alpha = NULL,
-                               id = NULL,
-                               normals = NULL,
-                               material = ggwebgl_material(),
-                               pick_id = NULL,
-                               panel_id = 1L,
-                               geom = "adapter_mesh",
-                               wireframe = NULL) {
-  vertices <- ggwebgl_adapter_data(vertices)
-  env <- parent.frame()
-  xs <- ggwebgl_resolve_arg(vertices, substitute(x), env, "x", required = TRUE)
-  ys <- ggwebgl_resolve_arg(vertices, substitute(y), env, "y", required = TRUE)
-  zs <- ggwebgl_resolve_arg(vertices, substitute(z), env, "z", default = NULL)
-  n <- ggwebgl_common_length(x = xs, y = ys)
-
-  xs <- ggwebgl_recycle(xs, n, "x")
-  ys <- ggwebgl_recycle(ys, n, "y")
-  zs <- ggwebgl_recycle(zs %||% 0, n, "z")
-
-  colour_values <- ggwebgl_resolve_arg(vertices, substitute(colour), env, "colour", default = NULL)
-  rgba_values <- ggwebgl_resolve_arg(vertices, substitute(rgba), env, "rgba", default = NULL)
-  alpha_values <- ggwebgl_resolve_arg(vertices, substitute(alpha), env, "alpha", default = NULL)
-  id_values <- ggwebgl_resolve_arg(vertices, substitute(id), env, "id", default = NULL)
-  rgba_matrix <- ggwebgl_resolve_rgba(rgba_values, colour_values, alpha_values, n)
-  id_values <- if (is.null(id_values)) NULL else as.character(ggwebgl_recycle(id_values, n, "id"))
-
-  if (is.null(triangles)) {
-    triangles <- vertices
-  } else {
-    triangles <- ggwebgl_adapter_data(triangles)
-  }
-
-  tri_env <- parent.frame()
-  ii <- ggwebgl_resolve_arg(triangles, substitute(i), tri_env, "i", default = NULL)
-  jj <- ggwebgl_resolve_arg(triangles, substitute(j), tri_env, "j", default = NULL)
-  kk <- ggwebgl_resolve_arg(triangles, substitute(k), tri_env, "k", default = NULL)
-  if (is.null(ii) && all(c("i", "j", "k") %in% names(triangles))) {
-    ii <- triangles$i
-    jj <- triangles$j
-    kk <- triangles$k
-  }
-  if (is.null(ii) || is.null(jj) || is.null(kk)) {
-    rlang::abort("Mesh layers require triangle indices `i`, `j`, and `k`.")
-  }
-
-  m <- ggwebgl_common_length(i = ii, j = jj, k = kk)
-  indices <- as.integer(c(rbind(
-    ggwebgl_recycle(ii, m, "i"),
-    ggwebgl_recycle(jj, m, "j"),
-    ggwebgl_recycle(kk, m, "k")
-  )))
-  keep <- is.finite(indices)
-  if (!all(keep)) {
-    indices <- indices[keep]
-  }
-  if (length(indices) %% 3L != 0L || !length(indices)) {
-    rlang::abort("Mesh triangle indices must form complete triangles.")
-  }
-  if (any(indices < 1L | indices > n)) {
-    rlang::abort("Mesh triangle indices must refer to existing vertices.")
-  }
-  triangle_count <- as.integer(length(indices) / 3L)
-  normals_matrix <- ggwebgl_resolve_normals(normals, xs, ys, zs, indices)
-  material <- normalise_material(material, wireframe = wireframe)
-  pick_id <- ggwebgl_resolve_pick_id(pick_id, triangle_count)
-
-  compact_list(list(
-    panel_id = ggwebgl_panel_id(panel_id),
-    type = "mesh",
-    geom = as.character(geom)[[1L]],
-    rows = triangle_count,
-    vertex_count = as.integer(n),
-    triangle_count = triangle_count,
-    x = unname(as.numeric(xs)),
-    y = unname(as.numeric(ys)),
-    z = unname(as.numeric(zs)),
-    indices = unname(as.integer(indices - 1L)),
-    id = unname(id_values),
-    normal = unname(as.numeric(t(normals_matrix))),
-    rgba = unname(as.numeric(t(rgba_matrix))),
-    material = material,
-    pick_id = unname(pick_id),
-    wireframe = isTRUE(material$wireframe)
-  ))
-}
-
-#' Renderer-Ready Surface Layer
-#'
-#' Build a triangulated surface from a regular z matrix.
-#'
-#' @param z Numeric matrix of height values.
-#' @param x,y Optional coordinate vectors. Defaults to matrix column and row
-#'   indices.
-#' @param palette HCL palette name used when `colour` or `rgba` is omitted.
-#' @param normals Normal-generation mode. `"auto"` computes vertex normals.
-#' @param material Surface material created by [ggwebgl_material()].
-#' @param pick_id Optional face picking ids.
-#' @inheritParams ggwebgl_layer_mesh
-#'
-#' @return A normalized mesh layer list.
-#'
-#' @examples
-#' ggwebgl_layer_surface(volcano[1:4, 1:4])
-#' @export
-ggwebgl_layer_surface <- function(z,
-                                  x = NULL,
-                                  y = NULL,
-                                  colour = NULL,
-                                  rgba = NULL,
-                                  alpha = NULL,
-                                  palette = "Terrain 2",
-                                  normals = "auto",
-                                  material = ggwebgl_material(shading = "lambert"),
-                                  pick_id = NULL,
-                                  panel_id = 1L,
-                                  geom = "adapter_surface",
-                                  wireframe = NULL) {
-  z <- as.matrix(z)
-  storage.mode(z) <- "double"
-  nr <- nrow(z)
-  nc <- ncol(z)
-  if (!nr || !nc) {
-    rlang::abort("`z` must be a non-empty numeric matrix.")
-  }
-
-  x <- as.numeric(x %||% seq_len(nc))
-  y <- as.numeric(y %||% seq_len(nr))
-  if (length(x) != nc || length(y) != nr) {
-    rlang::abort("`x` and `y` must match the matrix columns and rows.")
-  }
-
-  vertices <- expand.grid(x = x, y = y)
-  vertices$z <- as.numeric(t(z))
-  n <- nrow(vertices)
-
-  if (is.null(rgba) && is.null(colour)) {
-    rng <- range(vertices$z, finite = TRUE)
-    scaled <- if (diff(rng) > 0) (vertices$z - rng[[1]]) / diff(rng) else rep(0.5, n)
-    ramp <- grDevices::colorRampPalette(grDevices::hcl.colors(9L, palette))
-    colour <- ramp(256L)[pmax(1L, pmin(256L, as.integer(round(scaled * 255)) + 1L))]
-  }
-
-  tri <- ggwebgl_surface_triangles(nr, nc)
-  ggwebgl_layer_mesh(
-    vertices = vertices,
-    x = "x",
-    y = "y",
-    z = "z",
-    triangles = tri,
-    colour = colour,
-    rgba = rgba,
-    alpha = alpha %||% 1,
-    normals = normals,
-    material = material,
-    pick_id = pick_id,
-    panel_id = panel_id,
-    geom = geom,
-    wireframe = wireframe
-  )
-}
-
 #' Build a ggWebGL Specification from Renderer-Ready Layers
 #'
-#' @param layers A list of normalized point, line, raster, vector, or mesh
-#'   layers.
+#' @param layers A list of normalized point, line, raster, vector, ribbon, mesh,
+#'   or surface layers.
 #' @param labels Optional labels list (`title`, `subtitle`, `x`, `y`).
 #' @param webgl Optional renderer options passed to [theme_webgl()].
 #' @param grid Optional list with `rows` and `cols`.
@@ -610,11 +505,14 @@ ggwebgl_spec <- function(layers,
 
   layers <- lapply(layers, ggwebgl_validate_layer)
   panel_specs <- ggwebgl_build_panels(layers, panels = panels, grid = grid)
-  webgl <- normalise_webgl_options(webgl)
+  webgl <- ggwebgl_scene_webgl_options(webgl)
   if (!is.null(timeline)) {
     webgl$timeline <- normalise_timeline(timeline)
   }
-  render <- ggwebgl_enrich_render(ggwebgl_build_render(panel_specs, messages = messages), webgl)
+  render <- ggwebgl_build_render(panel_specs, messages = messages)
+  webgl <- ggwebgl_complete_timeline(webgl, render)
+  render <- ggwebgl_apply_transport(render, webgl)
+  render <- ggwebgl_enrich_render(render, webgl)
   layer_metadata <- lapply(seq_along(layers), function(i) {
     compact_list(list(
       index = as.integer(i),
@@ -626,15 +524,18 @@ ggwebgl_spec <- function(layers,
     ))
   })
 
+  scene <- validate_ggwebgl_scene(compact_list(list(
+    scene_version = ggwebgl_scene_version(),
+    package_version = as.character(utils::packageVersion("ggWebGL")),
+    labels = ggwebgl_labels(labels),
+    webgl = webgl,
+    layer_count = as.integer(length(layers)),
+    layers = layer_metadata,
+    render = render
+  )), allow_legacy = FALSE)
+
   structure(
-    compact_list(list(
-      package_version = as.character(utils::packageVersion("ggWebGL")),
-      labels = ggwebgl_labels(labels),
-      webgl = webgl,
-      layer_count = as.integer(length(layers)),
-      layers = layer_metadata,
-      render = render
-    )),
+    scene,
     class = c("ggwebgl_spec", "list")
   )
 }
@@ -690,6 +591,20 @@ ggwebgl_common_length <- function(...) {
   }
 
   as.integer(lengths[[1L]])
+}
+
+ggwebgl_rect_common_length <- function(...) {
+  values <- list(...)
+  lengths <- vapply(values, length, integer(1))
+
+  if (all(lengths == 0L)) {
+    return(0L)
+  }
+  if (any(lengths == 0L)) {
+    rlang::abort("Rectangle bounds must all be empty or all have length 1 or a common length.")
+  }
+
+  ggwebgl_common_length(...)
 }
 
 ggwebgl_recycle <- function(value, n, name) {
@@ -749,100 +664,10 @@ ggwebgl_scalar_number <- function(value, name) {
   value
 }
 
-ggwebgl_surface_triangles <- function(nr, nc) {
-  if (nr < 2L || nc < 2L) {
-    return(data.frame(i = integer(), j = integer(), k = integer()))
-  }
-
-  cells <- expand.grid(row = seq_len(nr - 1L), col = seq_len(nc - 1L))
-  index <- function(row, col) {
-    as.integer((col - 1L) * nr + row)
-  }
-
-  tris <- do.call(rbind, lapply(seq_len(nrow(cells)), function(row_id) {
-    row <- cells$row[[row_id]]
-    col <- cells$col[[row_id]]
-    v00 <- index(row, col)
-    v10 <- index(row + 1L, col)
-    v01 <- index(row, col + 1L)
-    v11 <- index(row + 1L, col + 1L)
-    rbind(
-      c(i = v00, j = v10, k = v11),
-      c(i = v00, j = v11, k = v01)
-    )
-  }))
-
-  as.data.frame(tris)
-}
-
-ggwebgl_resolve_pick_id <- function(pick_id, triangle_count) {
-  if (is.null(pick_id)) {
-    return(NULL)
-  }
-  pick_id <- as.character(ggwebgl_recycle(pick_id, triangle_count, "pick_id"))
-  pick_id[is.na(pick_id)] <- ""
-  pick_id
-}
-
-ggwebgl_resolve_normals <- function(normals, xs, ys, zs, indices) {
-  n <- length(xs)
-  if (is.null(normals) || identical(normals, "auto")) {
-    return(ggwebgl_mesh_normals(xs, ys, zs, indices))
-  }
-
-  values <- as.numeric(normals)
-  if (is.matrix(normals) || is.data.frame(normals)) {
-    matrix_values <- as.matrix(normals)
-    if (ncol(matrix_values) != 3L || nrow(matrix_values) != n) {
-      rlang::abort("`normals` must have three columns and one row per vertex.")
-    }
-    out <- matrix(as.numeric(matrix_values), ncol = 3L)
-  } else {
-    if (length(values) != n * 3L) {
-      rlang::abort("`normals` must have length `vertex_count * 3`.")
-    }
-    out <- matrix(values, ncol = 3L, byrow = TRUE)
-  }
-
-  ggwebgl_normalise_normal_matrix(out)
-}
-
-ggwebgl_normalise_normal_matrix <- function(normals) {
-  norms <- sqrt(rowSums(normals^2))
-  bad <- !is.finite(norms) | norms <= 0
-  norms[bad] <- 1
-  normals <- normals / norms
-  if (any(bad)) {
-    normals[bad, ] <- matrix(c(0, 0, 1), nrow = sum(bad), ncol = 3L, byrow = TRUE)
-  }
-  normals
-}
-
-ggwebgl_mesh_normals <- function(xs, ys, zs, indices) {
-  n <- length(xs)
-  normals <- matrix(0, nrow = n, ncol = 3L)
-  for (offset in seq(1L, length(indices), by = 3L)) {
-    tri <- indices[offset + 0:2]
-    if (length(tri) != 3L || any(!is.finite(tri)) || any(tri < 1L | tri > n)) {
-      next
-    }
-    p1 <- c(xs[tri[[1L]]], ys[tri[[1L]]], zs[tri[[1L]]])
-    p2 <- c(xs[tri[[2L]]], ys[tri[[2L]]], zs[tri[[2L]]])
-    p3 <- c(xs[tri[[3L]]], ys[tri[[3L]]], zs[tri[[3L]]])
-    normal <- c(
-      (p2[[2L]] - p1[[2L]]) * (p3[[3L]] - p1[[3L]]) - (p2[[3L]] - p1[[3L]]) * (p3[[2L]] - p1[[2L]]),
-      (p2[[3L]] - p1[[3L]]) * (p3[[1L]] - p1[[1L]]) - (p2[[1L]] - p1[[1L]]) * (p3[[3L]] - p1[[3L]]),
-      (p2[[1L]] - p1[[1L]]) * (p3[[2L]] - p1[[2L]]) - (p2[[2L]] - p1[[2L]]) * (p3[[1L]] - p1[[1L]])
-    )
-    normals[tri, ] <- normals[tri, , drop = FALSE] + matrix(normal, nrow = 3L, ncol = 3L, byrow = TRUE)
-  }
-  ggwebgl_normalise_normal_matrix(normals)
-}
-
 ggwebgl_validate_layer <- function(layer) {
   if (!is.list(layer) || is.null(layer$type) ||
-      !layer$type %in% c("points", "lines", "raster", "vectors", "mesh")) {
-    rlang::abort("Each layer must be a renderer-ready points, lines, raster, vectors, or mesh layer.")
+      !layer$type %in% c("points", "lines", "raster", "vectors", "rects", "ribbons", "text", "mesh", "surface")) {
+    rlang::abort("Each layer must be a renderer-ready points, lines, raster, vectors, rects, ribbons, text, mesh, or surface layer.")
   }
 
   layer
@@ -891,6 +716,7 @@ ggwebgl_panel_meta <- function(panel_ids, panels = NULL, grid = NULL) {
       col = as.integer(panel$col %||% 1L),
       label = panel$label %||% NULL,
       viewport = panel$viewport %||% NULL,
+      viewport_source = if (is.null(panel$viewport)) NULL else "explicit",
       bounds = panel$bounds %||% NULL
     ))
   })
@@ -931,7 +757,11 @@ ggwebgl_panel_from_layers <- function(panel, layers) {
   line_layers <- Filter(function(x) identical(x$type, "lines"), layers)
   raster_layers <- Filter(function(x) identical(x$type, "raster"), layers)
   vector_layers <- Filter(function(x) identical(x$type, "vectors"), layers)
+  rect_layers <- Filter(function(x) identical(x$type, "rects"), layers)
+  ribbon_layers <- Filter(function(x) identical(x$type, "ribbons"), layers)
+  text_layers <- Filter(function(x) identical(x$type, "text"), layers)
   mesh_layers <- Filter(function(x) identical(x$type, "mesh"), layers)
+  surface_layers <- Filter(function(x) identical(x$type, "surface"), layers)
 
   compact_list(list(
     panel_id = panel$panel_id,
@@ -940,14 +770,22 @@ ggwebgl_panel_from_layers <- function(panel, layers) {
     label = panel$label,
     bounds = panel$bounds,
     viewport = panel$viewport %||% ggwebgl_viewport_from_layers(layers),
+    viewport_source = panel$viewport_source %||% if (is.null(panel$viewport)) "layer_bounds" else "explicit",
     primitives = unique(vapply(layers, `[[`, character(1), "type")),
     point_count = sum(vapply(point_layers, `[[`, integer(1), "rows")),
     line_vertex_count = sum(vapply(line_layers, `[[`, integer(1), "rows")),
     path_count = sum(vapply(line_layers, `[[`, integer(1), "path_count")),
     raster_cell_count = sum(vapply(raster_layers, function(x) x$width * x$height, integer(1))),
     vector_count = sum(vapply(vector_layers, `[[`, integer(1), "rows")),
+    rect_count = sum(vapply(rect_layers, `[[`, integer(1), "rows")),
+    ribbon_count = sum(vapply(ribbon_layers, `[[`, integer(1), "strip_count")),
+    ribbon_vertex_count = sum(vapply(ribbon_layers, `[[`, integer(1), "rows")),
+    ribbon_triangle_count = sum(vapply(ribbon_layers, `[[`, integer(1), "triangle_count")),
+    text_count = sum(vapply(text_layers, `[[`, integer(1), "rows")),
     mesh_vertex_count = sum(vapply(mesh_layers, `[[`, integer(1), "vertex_count")),
     mesh_triangle_count = sum(vapply(mesh_layers, `[[`, integer(1), "triangle_count")),
+    surface_vertex_count = sum(vapply(surface_layers, `[[`, integer(1), "vertex_count")),
+    surface_triangle_count = sum(vapply(surface_layers, `[[`, integer(1), "triangle_count")),
     layers = layers
   ))
 }
@@ -981,8 +819,21 @@ ggwebgl_viewport_from_layers <- function(layers) {
       extend(c(layer$xmin, layer$xmax), c(layer$ymin, layer$ymax))
     } else if (identical(layer$type, "vectors")) {
       extend(c(layer$x, layer$xend), c(layer$y, layer$yend))
+    } else if (identical(layer$type, "rects")) {
+      extend(c(layer$xmin, layer$xmax), c(layer$ymin, layer$ymax))
+    } else if (identical(layer$type, "ribbons")) {
+      for (strip in layer$strips %||% list()) {
+        extend(c(strip$x, strip$x), c(strip$ymin, strip$ymax))
+      }
+    } else if (identical(layer$type, "text")) {
+      extend(layer$x, layer$y)
     } else if (identical(layer$type, "mesh")) {
       extend(layer$x, layer$y)
+    } else if (identical(layer$type, "surface")) {
+      positions <- matrix(as.numeric(layer$positions %||% numeric()), ncol = 3L, byrow = TRUE)
+      if (nrow(positions)) {
+        extend(positions[, 1L], positions[, 2L])
+      }
     }
   }
 
@@ -999,8 +850,15 @@ ggwebgl_build_render <- function(panels, messages = character()) {
   path_count <- sum(vapply(panels, `[[`, integer(1), "path_count"))
   raster_cell_count <- sum(vapply(panels, `[[`, integer(1), "raster_cell_count"))
   vector_count <- sum(vapply(panels, `[[`, integer(1), "vector_count"))
+  rect_count <- sum(vapply(panels, `[[`, integer(1), "rect_count"))
+  ribbon_count <- sum(vapply(panels, `[[`, integer(1), "ribbon_count"))
+  ribbon_vertex_count <- sum(vapply(panels, `[[`, integer(1), "ribbon_vertex_count"))
+  ribbon_triangle_count <- sum(vapply(panels, `[[`, integer(1), "ribbon_triangle_count"))
+  text_count <- sum(vapply(panels, `[[`, integer(1), "text_count"))
   mesh_vertex_count <- sum(vapply(panels, `[[`, integer(1), "mesh_vertex_count"))
   mesh_triangle_count <- sum(vapply(panels, `[[`, integer(1), "mesh_triangle_count"))
+  surface_vertex_count <- sum(vapply(panels, `[[`, integer(1), "surface_vertex_count"))
+  surface_triangle_count <- sum(vapply(panels, `[[`, integer(1), "surface_triangle_count"))
   primitives <- unique(unlist(lapply(panels, `[[`, "primitives"), use.names = FALSE))
   has_layers <- any(vapply(panels, function(panel) length(panel$layers), integer(1)) > 0L)
   grid <- attr(panels, "grid", exact = TRUE) %||% list(
@@ -1008,7 +866,7 @@ ggwebgl_build_render <- function(panels, messages = character()) {
     cols = max(vapply(panels, `[[`, integer(1), "col"))
   )
 
-  add_single_panel_compatibility(compact_list(list(
+  derive_single_panel_compatibility(compact_list(list(
     mode = if (has_layers) "webgl" else "metadata",
     grid = grid,
     panels = panels,
@@ -1018,27 +876,22 @@ ggwebgl_build_render <- function(panels, messages = character()) {
     path_count = path_count,
     raster_cell_count = raster_cell_count,
     vector_count = vector_count,
+    rect_count = rect_count,
+    ribbon_count = ribbon_count,
+    ribbon_vertex_count = ribbon_vertex_count,
+    ribbon_triangle_count = ribbon_triangle_count,
+    text_count = text_count,
     mesh_vertex_count = mesh_vertex_count,
     mesh_triangle_count = mesh_triangle_count,
+    surface_vertex_count = surface_vertex_count,
+    surface_triangle_count = surface_triangle_count,
     unsupported_layers = list(),
     messages = unname(as.character(messages))
   )))
 }
 
 ggwebgl_enrich_render <- function(render, webgl) {
-  webgl <- normalise_webgl_options(webgl)
-  render$dimension <- webgl$view$dimension %||% webgl$dimension %||% "2d"
-  render$camera <- compact_list(list(
-    mode = webgl$view$controller %||% webgl$camera %||% "orbit",
-    controller = webgl$view$controller %||% webgl$camera %||% "orbit",
-    projection = webgl$view$projection %||% webgl$projection %||% "orthographic",
-    state = webgl$view$state %||% webgl$camera_state %||% list()
-  ))
-  render$selection <- webgl$selection %||% list(mode = "none", highlight = TRUE, emit = TRUE)
-  if (!is.null(webgl$timeline)) {
-    render$timeline <- webgl$timeline
-  }
-  render
+  ggwebgl_enrich_scene_render(render, webgl)
 }
 
 ggwebgl_labels <- function(labels) {

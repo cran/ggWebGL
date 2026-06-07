@@ -9,77 +9,120 @@ load_renderer_and_boids4r_packages <- function() {
     return(invisible(TRUE))
   }
 
-  sibling_candidates <- normalizePath(
-    c("../boids4R", "../../boids4R", "../../../boids4R"),
-    winslash = "/",
-    mustWork = FALSE
-  )
-  sibling_repo <- sibling_candidates[file.exists(file.path(sibling_candidates, "DESCRIPTION"))][1L]
-  if (is.na(sibling_repo)) {
-    return(FALSE)
-  }
-  if (requireNamespace("pkgload", quietly = TRUE) && file.exists(file.path(sibling_repo, "DESCRIPTION"))) {
-    loaded <- tryCatch({
-      pkgload::load_all(sibling_repo, export_all = FALSE, helpers = FALSE, quiet = TRUE)
-      requireNamespace("boids4R", quietly = TRUE)
-    }, error = function(e) {
-      FALSE
-    })
-    if (isTRUE(loaded)) {
-      return(invisible(TRUE))
-    }
-  }
-
   FALSE
 }
 
-build_downstream_boids4r_simulations <- function() {
+build_downstream_boids4r_simulations <- function(demo_steps = 240L) {
   if (identical(load_renderer_and_boids4r_packages(), FALSE)) {
     return(NULL)
   }
+  demo_steps <- as.integer(demo_steps)
 
   list(
     schooling_2d = boids4R::boids_scenario(
       "schooling_2d",
       n = 260L,
-      steps = 80L,
-      record_every = 2L,
+      steps = demo_steps,
+      record_every = 3L,
       seed = 2601L
     ),
     murmuration_3d = boids4R::boids_scenario(
       "murmuration_3d",
       n = 360L,
-      steps = 90L,
-      record_every = 3L,
+      steps = demo_steps,
+      record_every = 4L,
       seed = 2602L
     )
   )
 }
 
-downstream_boids4r_specs <- function() {
-  sims <- build_downstream_boids4r_simulations()
+downstream_boids4r_specs <- function(boid_size = 3.6,
+                                     prey_size = 4.8,
+                                     predator_size = 7.5,
+                                     role_palette = NULL,
+                                     boid_alpha = 0.88,
+                                     trail_alpha = 0.18,
+                                     vector_mode = c("current", "sampled", "all", "none"),
+                                     vector_colour_mode = c("species", "role", "fixed"),
+                                     vector_colour = "#334155",
+                                     vector_alpha = 0.68,
+                                     vector_width = 1.25,
+                                     vector_every = 1L,
+                                     vector_scale = NULL,
+                                     obstacle_mode = c("ring", "disc", "none"),
+                                     obstacle_segments = 48L,
+                                     obstacle_alpha = 0.9,
+                                     trail = c("recent", "none", "all"),
+                                     trail_length = 32L,
+                                     shader = "default",
+                                     demo_steps = 240L,
+                                     fps = 24L,
+                                     playback_speed = 1.4) {
+  sims <- build_downstream_boids4r_simulations(demo_steps = demo_steps)
   if (is.null(sims)) {
     return(NULL)
   }
+  vector_mode <- match.arg(vector_mode)
+  vector_colour_mode <- match.arg(vector_colour_mode)
+  obstacle_mode <- match.arg(obstacle_mode)
+  trail <- match.arg(trail)
+  vector_scale_2d <- if (is.null(vector_scale)) 0.15 else vector_scale
+  vector_scale_3d <- if (is.null(vector_scale)) 0.12 else vector_scale
 
   list(
-    schooling_2d = boids4R::as_ggwebgl_spec(
+    schooling_2d = ggWebGL:::ggwebgl_boids_display_spec(
       sims$schooling_2d,
-      vector_every = 12L,
-      vector_scale = 0.13,
-      shader = "density_splat"
+      boid_size = boid_size,
+      prey_size = prey_size,
+      predator_size = predator_size,
+      role_palette = role_palette,
+      current_alpha = boid_alpha,
+      trail_alpha = trail_alpha,
+      vector_mode = vector_mode,
+      vector_colour_mode = vector_colour_mode,
+      vector_colour = vector_colour,
+      vector_alpha = vector_alpha,
+      vector_width = vector_width,
+      vector_every = vector_every,
+      vector_scale = vector_scale_2d,
+      obstacle_mode = obstacle_mode,
+      obstacle_segments = obstacle_segments,
+      obstacle_alpha = obstacle_alpha,
+      trail = trail,
+      trail_length = trail_length,
+      shader = shader,
+      fps = fps,
+      playback_speed = playback_speed
     ),
-    murmuration_3d = boids4R::as_ggwebgl_spec(
+    murmuration_3d = ggWebGL:::ggwebgl_boids_display_spec(
       sims$murmuration_3d,
-      vector_every = 14L,
-      vector_scale = 0.12,
-      shader = "default"
+      boid_size = max(3, boid_size - 0.2),
+      prey_size = prey_size,
+      predator_size = predator_size,
+      role_palette = role_palette,
+      current_alpha = boid_alpha,
+      trail_alpha = trail_alpha,
+      vector_mode = vector_mode,
+      vector_colour_mode = vector_colour_mode,
+      vector_colour = vector_colour,
+      vector_alpha = vector_alpha,
+      vector_width = vector_width,
+      vector_every = vector_every,
+      vector_scale = vector_scale_3d,
+      obstacle_mode = obstacle_mode,
+      obstacle_segments = obstacle_segments,
+      obstacle_alpha = obstacle_alpha,
+      trail = trail,
+      trail_length = trail_length,
+      shader = shader,
+      fps = fps,
+      playback_speed = playback_speed
     )
   )
 }
 
-downstream_boids4r_widgets <- function() {
-  specs <- downstream_boids4r_specs()
+downstream_boids4r_widgets <- function(...) {
+  specs <- downstream_boids4r_specs(...)
   if (is.null(specs)) {
     return(NULL)
   }
@@ -108,10 +151,12 @@ export_downstream_boids4r_gallery <- function(output_dir = tempfile("ggwebgl-boi
   invisible(files)
 }
 
-widgets <- downstream_boids4r_widgets()
-if (is.null(widgets)) {
-  cat("boids4R is unavailable; skipping downstream boids4R animation demo.\n")
-} else {
-  print(widgets$schooling_2d)
-  print(widgets$murmuration_3d)
+if (identical(environment(), globalenv())) {
+  widgets <- downstream_boids4r_widgets()
+  if (is.null(widgets)) {
+    cat("boids4R is unavailable; skipping downstream boids4R animation demo.\n")
+  } else {
+    print(widgets$schooling_2d)
+    print(widgets$murmuration_3d)
+  }
 }

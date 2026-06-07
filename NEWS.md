@@ -1,4 +1,54 @@
-# ggWebGL 0.4.0
+# ggWebGL 0.8.0
+
+- Added a separate vignette gate for live WebGL widgets across coverage,
+  renderer capability/showcase, real-data, boids, surface/mesh, and temporal
+  trajectory articles so CRAN source builds, CRAN checks, and CI can show
+  examples without executing browser-side widget chunks.
+- Kept rich local and pkgdown vignette rendering opt-in through
+  `GGWEBGL_EVAL_COVERAGE_VIGNETTE=true` plus
+  `GGWEBGL_EVAL_LIVE_WIDGETS=true`.
+- Delegated boids display defaults to the updated `boids4R::as_ggwebgl_spec()`
+  adapter so species-aware velocity colours, current-boid emphasis, recent
+  trails, and obstacle context rings are preserved by the optional integration.
+- Split the live `boids4R` animation article into an overview plus smaller 2D,
+  3D, and custom-workflow pages so generated pkgdown artifacts remain below
+  repository hosting file-size limits.
+
+# ggWebGL 0.7.0
+
+- Added `ggwebgl_interactions()` as the structured interaction contract for
+  hover, click, brush/lasso, camera, and Shiny event behavior.
+- Added renderer-owned hover/click picking coverage for additional primitive
+  types, including vectors, raster cells, and structured surfaces.
+- Unified Shiny interaction event emission for hover, selection, brush, camera,
+  and timeline/time state while preserving existing timeline update APIs.
+- Added a CRAN-safe Shiny interaction demo that exercises hover, click, brush,
+  camera, and time events without custom JavaScript.
+- Added compact point transport and deterministic LOD metadata for large point
+  scenes, plus manual dense-scene smoke helpers that record payload and browser
+  diagnostics without making fixed performance statements.
+- Added neutral scene-type benchmark helpers and public examples for dense
+  embeddings, trajectory timelines, surface/mesh rendering, Shiny interaction,
+  and static-versus-WebGL workflow comparison.
+- Added surface/mesh and interactive benchmark vignettes built from small
+  deterministic examples and manual metric schemas.
+
+# ggWebGL 0.6.0
+
+- Added `XGeoRTR` and `boids4R` to `Suggests` as optional integrations while
+  keeping them out of hard dependencies.
+- Restored the richer `boids4R` animation and swarm-art vignette plus the
+  matching htmlwidget example, using installed suggested packages instead of
+  sibling-repository loading.
+- Restored live `XGeoRTR` bridge vignette behavior with neutral
+  renderer/backend ownership wording and guarded example code.
+- Kept `shapViz3D` as a guarded optional ecosystem example without adding it
+  to package dependencies.
+- Updated dependency and bridge tests to allow `XGeoRTR` and `boids4R` in
+  `Suggests` while continuing to reject hard dependencies on optional ecosystem
+  packages.
+
+# ggWebGL 0.5.0
 
 - Froze the experimental renderer API around structured `ggwebgl_view()`,
   `ggwebgl_selection()`, and `ggwebgl_material()` contracts.
@@ -12,18 +62,6 @@
 - Expanded the interaction-frame benchmark artifact schema so fixed frame-rate
   performance statements require device, browser, GPU, commit, primitive-count,
   and artifact metadata.
-- Added a guarded optional downstream `boids4R` animation vignette and htmlwidget
-  example that render renderer-neutral swarm frames as exact-timeline point and
-  vector primitives. The examples keep `boids4R` as an optional development
-  ecosystem package and avoid attaching its namespace during ggWebGL tests.
-- Reframed the optional `boids4R` documentation as browser-native swarm art,
-  clarifying that `boids4R` owns simulation semantics while `ggWebGL` owns
-  WebGL rendering and timeline interaction.
-- Prepared CRAN self-containment by removing GitHub-only ecosystem packages
-  from `DESCRIPTION`, gating live optional bridge vignettes behind an explicit
-  development environment variable, and documenting that `XGeoRTR`, `boids4R`,
-  and `shapViz3D` are optional integrations rather than installation
-  requirements.
 
 # ggWebGL 0.3.0
 - Added exported ggwebgl_magnify_region() in R/magnify-region.R, with panel and 

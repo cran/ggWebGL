@@ -8,7 +8,10 @@ GeomPointWebGL <- ggplot2::ggproto(
     "tooltip",
     "key",
     "sample_id",
-    "point_id"
+    "point_id",
+    "z",
+    "frame",
+    "time"
   )
 )
 GeomLineWebGL <- ggplot2::ggproto(
@@ -16,24 +19,142 @@ GeomLineWebGL <- ggplot2::ggproto(
   ggplot2::GeomLine,
   optional_aes = c(ggplot2::GeomLine$optional_aes, "z", "frame", "time")
 )
+GeomPathWebGL <- ggplot2::ggproto(
+  "GeomPathWebGL",
+  ggplot2::GeomPath,
+  optional_aes = c(ggplot2::GeomPath$optional_aes, "frame", "time")
+)
+GeomPath3DWebGL <- ggplot2::ggproto(
+  "GeomPath3DWebGL",
+  ggplot2::GeomPath,
+  optional_aes = c(ggplot2::GeomPath$optional_aes, "z", "frame", "time")
+)
+GeomFreqpolyWebGL <- ggplot2::ggproto(
+  "GeomFreqpolyWebGL",
+  ggplot2::GeomPath,
+  optional_aes = c(ggplot2::GeomPath$optional_aes, "fill", "frame", "time")
+)
+GeomDensityWebGL <- ggplot2::ggproto(
+  "GeomDensityWebGL",
+  ggplot2::GeomPath,
+  optional_aes = c(ggplot2::GeomPath$optional_aes, "fill", "frame", "time")
+)
+GeomDensity2dWebGL <- ggplot2::ggproto(
+  "GeomDensity2dWebGL",
+  ggplot2::GeomDensity2d,
+  optional_aes = c(ggplot2::GeomDensity2d$optional_aes, "frame", "time")
+)
+GeomContourWebGL <- ggplot2::ggproto(
+  "GeomContourWebGL",
+  ggplot2::GeomContour,
+  optional_aes = c(ggplot2::GeomContour$optional_aes, "frame", "time")
+)
 GeomRasterWebGL <- ggplot2::ggproto("GeomRasterWebGL", ggplot2::GeomRaster)
+GeomRectWebGL <- ggplot2::ggproto(
+  "GeomRectWebGL",
+  ggplot2::GeomRect,
+  optional_aes = c(ggplot2::GeomRect$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomRect$extra_params, "lineend", "linejoin")
+)
+GeomTileWebGL <- ggplot2::ggproto(
+  "GeomTileWebGL",
+  ggplot2::GeomTile,
+  optional_aes = c(ggplot2::GeomTile$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomTile$extra_params, "lineend", "linejoin")
+)
+GeomBarWebGL <- ggplot2::ggproto(
+  "GeomBarWebGL",
+  ggplot2::GeomBar,
+  optional_aes = c(ggplot2::GeomBar$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomBar$extra_params, "lineend", "linejoin")
+)
+GeomBin2dWebGL <- ggplot2::ggproto(
+  "GeomBin2dWebGL",
+  ggplot2::GeomBin2d,
+  optional_aes = c(ggplot2::GeomBin2d$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomBin2d$extra_params, "lineend", "linejoin")
+)
+GeomRibbonWebGL <- ggplot2::ggproto(
+  "GeomRibbonWebGL",
+  ggplot2::GeomRibbon,
+  optional_aes = c(ggplot2::GeomRibbon$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomRibbon$extra_params, "lineend", "linejoin", "linemitre", "outline.type")
+)
+GeomAreaWebGL <- ggplot2::ggproto(
+  "GeomAreaWebGL",
+  ggplot2::GeomArea,
+  optional_aes = c(ggplot2::GeomArea$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomArea$extra_params, "lineend", "linejoin", "linemitre", "outline.type")
+)
+GeomPolygonWebGL <- ggplot2::ggproto(
+  "GeomPolygonWebGL",
+  ggplot2::GeomPolygon,
+  optional_aes = c(ggplot2::GeomPolygon$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomPolygon$extra_params, "rule", "lineend", "linejoin", "linemitre")
+)
+GeomTextWebGL <- ggplot2::ggproto(
+  "GeomTextWebGL",
+  ggplot2::GeomText,
+  optional_aes = c(ggplot2::GeomText$optional_aes, "frame", "time")
+)
+GeomLabelWebGL <- ggplot2::ggproto(
+  "GeomLabelWebGL",
+  ggplot2::GeomLabel,
+  optional_aes = c(ggplot2::GeomLabel$optional_aes, "frame", "time")
+)
+GeomRugWebGL <- ggplot2::ggproto(
+  "GeomRugWebGL",
+  ggplot2::GeomRug,
+  optional_aes = c(ggplot2::GeomRug$optional_aes, "frame", "time"),
+  extra_params = c(ggplot2::GeomRug$extra_params, "sides", "outside", "length", "lineend")
+)
+GeomViolinWebGL <- ggplot2::ggproto(
+  "GeomViolinWebGL",
+  ggplot2::GeomViolin,
+  optional_aes = c(ggplot2::GeomViolin$optional_aes, "frame", "time"),
+  extra_params = ggplot2::GeomViolin$extra_params
+)
+GeomSegmentWebGL <- ggplot2::ggproto(
+  "GeomSegmentWebGL",
+  ggplot2::GeomSegment,
+  optional_aes = c(ggplot2::GeomSegment$optional_aes, "z", "zend", "id", "frame", "time"),
+  extra_params = c(ggplot2::GeomSegment$extra_params, "head_size")
+)
+GeomLinerangeWebGL <- ggplot2::ggproto(
+  "GeomLinerangeWebGL",
+  ggplot2::GeomLinerange,
+  optional_aes = c(ggplot2::GeomLinerange$optional_aes, "frame", "time"),
+  extra_params = ggplot2::GeomLinerange$extra_params
+)
+GeomErrorbarWebGL <- ggplot2::ggproto(
+  "GeomErrorbarWebGL",
+  ggplot2::GeomErrorbar,
+  optional_aes = c(ggplot2::GeomErrorbar$optional_aes, "frame", "time"),
+  extra_params = ggplot2::GeomErrorbar$extra_params
+)
+GeomPointrangeWebGL <- ggplot2::ggproto(
+  "GeomPointrangeWebGL",
+  ggplot2::GeomPointrange,
+  optional_aes = c(ggplot2::GeomPointrange$optional_aes, "frame", "time"),
+  extra_params = ggplot2::GeomPointrange$extra_params
+)
+GeomCrossbarWebGL <- ggplot2::ggproto(
+  "GeomCrossbarWebGL",
+  ggplot2::GeomCrossbar,
+  optional_aes = c(ggplot2::GeomCrossbar$optional_aes, "frame", "time"),
+  extra_params = ggplot2::GeomCrossbar$extra_params
+)
+GeomBoxplotWebGL <- ggplot2::ggproto(
+  "GeomBoxplotWebGL",
+  ggplot2::GeomBoxplot,
+  optional_aes = c(ggplot2::GeomBoxplot$optional_aes, "frame", "time"),
+  extra_params = ggplot2::GeomBoxplot$extra_params
+)
 GeomVectorWebGL <- ggplot2::ggproto(
   "GeomVectorWebGL",
   ggplot2::GeomSegment,
   optional_aes = c(ggplot2::GeomSegment$optional_aes, "z", "zend", "id", "frame", "time"),
   extra_params = c(ggplot2::GeomSegment$extra_params, "head_size")
-)
-GeomMeshWebGL <- ggplot2::ggproto(
-  "GeomMeshWebGL",
-  ggplot2::GeomPoint,
-  optional_aes = c(ggplot2::GeomPoint$optional_aes, "z", "i", "j", "k", "id", "frame", "time"),
-  extra_params = c(ggplot2::GeomPoint$extra_params, "wireframe", "material", "normals", "pick_id")
-)
-GeomSurfaceWebGL <- ggplot2::ggproto(
-  "GeomSurfaceWebGL",
-  ggplot2::GeomRaster,
-  optional_aes = c(ggplot2::GeomRaster$optional_aes, "z", "frame", "time"),
-  extra_params = c(ggplot2::GeomRaster$extra_params, "wireframe", "material", "normals", "pick_id")
 )
 
 #' WebGL Point Layer
@@ -123,6 +244,330 @@ geom_line_webgl <- function(mapping = NULL,
   )
 }
 
+#' WebGL Ordered Path Layer
+#'
+#' Add an ordered two-dimensional path layer tagged for the `ggWebGL` rendering
+#' pipeline. Unlike [geom_line_webgl()], this geom is based on
+#' `ggplot2::GeomPath` and preserves row order within each group.
+#'
+#' @inheritParams ggplot2::geom_path
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' path_data <- data.frame(
+#'   x = c(3, 1, 2, 4),
+#'   y = c(0.2, 0.8, 0.4, 0.6),
+#'   frame = 1:4
+#' )
+#'
+#' path_plot <- ggplot2::ggplot(
+#'   path_data,
+#'   ggplot2::aes(x, y, frame = frame)
+#' ) +
+#'   geom_path_webgl(linewidth = 1.2) +
+#'   theme_webgl(shader = "trajectory_age")
+#'
+#' path_plot
+#' @export
+geom_path_webgl <- function(mapping = NULL,
+                            data = NULL,
+                            stat = "identity",
+                            position = "identity",
+                            ...,
+                            lineend = "butt",
+                            linejoin = "round",
+                            linemitre = 10,
+                            arrow = NULL,
+                            na.rm = FALSE,
+                            show.legend = NA,
+                            inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomPathWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      arrow = arrow,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Ordered 3D Path Layer
+#'
+#' Add an ordered three-dimensional path layer that is tagged for the `ggWebGL`
+#' rendering pipeline. Unlike [geom_line_webgl()], this geom is based on
+#' `ggplot2::GeomPath` and preserves row order within each group.
+#'
+#' @inheritParams ggplot2::geom_path
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' path_data <- data.frame(
+#'   x = c(0, 0.4, 0.2, 0.8),
+#'   y = c(0, 0.3, 0.7, 1),
+#'   z = c(0, 0.2, 0.5, 0.9),
+#'   frame = 1:4
+#' )
+#'
+#' path_plot <- ggplot2::ggplot(
+#'   path_data,
+#'   ggplot2::aes(x, y, z = z, frame = frame)
+#' ) +
+#'   geom_path3d_webgl(linewidth = 1.2) +
+#'   theme_webgl(shader = "trajectory_age")
+#'
+#' path_plot
+#' @export
+geom_path3d_webgl <- function(mapping = NULL,
+                              data = NULL,
+                              stat = "identity",
+                              position = "identity",
+                              ...,
+                              lineend = "butt",
+                              linejoin = "round",
+                              linemitre = 10,
+                              arrow = NULL,
+                              na.rm = FALSE,
+                              show.legend = NA,
+                              inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomPath3DWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      arrow = arrow,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Frequency Polygon Layer
+#'
+#' Add a frequency polygon layer tagged for the `ggWebGL` renderer. Binning is
+#' delegated to `ggplot2::StatBin`; the WebGL layer consumes the built path
+#' coordinates.
+#'
+#' @inheritParams ggplot2::geom_freqpoly
+#' @param stat Statistical transformation to use. Defaults to `"bin"` so
+#'   `ggplot2` computes frequency polygon bins before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_bin()` parameters such as `bins`, `binwidth`,
+#'   `breaks`, `boundary`, `center`, `closed`, and `pad`, plus static
+#'   aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' values <- data.frame(x = c(0.1, 0.2, 0.7, 1.2, 1.6, 2.1))
+#'
+#' ggplot2::ggplot(values, ggplot2::aes(x)) +
+#'   geom_freqpoly_webgl(binwidth = 0.5, colour = "#2563eb")
+#' @export
+geom_freqpoly_webgl <- function(mapping = NULL,
+                                data = NULL,
+                                stat = "bin",
+                                position = "identity",
+                                ...,
+                                na.rm = FALSE,
+                                show.legend = NA,
+                                inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFreqpolyWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(na.rm = na.rm, ...)
+  )
+}
+
+#' WebGL Density Curve Layer
+#'
+#' Add a density curve layer tagged for the `ggWebGL` renderer. Density
+#' estimation is delegated to `ggplot2::StatDensity`; this geom serializes the
+#' resulting curve as a line path. Filled densities are not rendered by this
+#' layer.
+#'
+#' @inheritParams ggplot2::geom_density
+#' @param stat Statistical transformation to use. Defaults to `"density"` so
+#'   `ggplot2` computes density curves before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_density()` parameters such as `adjust`, `kernel`,
+#'   `n`, `trim`, `bounds`, and `bw`, plus static aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' values <- data.frame(x = seq(-2, 2, length.out = 40))
+#'
+#' ggplot2::ggplot(values, ggplot2::aes(x)) +
+#'   geom_density_webgl(colour = "#0f766e")
+#' @export
+geom_density_webgl <- function(mapping = NULL,
+                               data = NULL,
+                               stat = "density",
+                               position = "identity",
+                               ...,
+                               outline.type = "upper",
+                               lineend = "butt",
+                               linejoin = "round",
+                               linemitre = 10,
+                               na.rm = FALSE,
+                               show.legend = NA,
+                               inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomDensityWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL 2D Density Contour Layer
+#'
+#' Add a line-contour density layer tagged for the `ggWebGL` renderer. The 2D
+#' density estimate and contour lines are computed by `ggplot2`; this layer
+#' serializes the built contour paths as grouped WebGL line primitives. Filled
+#' density contours are not rendered by this layer.
+#'
+#' @inheritParams ggplot2::geom_density2d
+#' @param stat Statistical transformation to use. Defaults to `"density_2d"`
+#'   so `ggplot2` computes two-dimensional density contours before WebGL
+#'   serialization. This `ggplot2` statistic uses `MASS`, which is listed in
+#'   `Suggests` and guarded in examples/tests.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_density_2d()` parameters such as `h`, `n`,
+#'   `bins`, `binwidth`, and `breaks`, plus static aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' density_points <- expand.grid(x = seq(-1, 1, length.out = 6), y = seq(-1, 1, length.out = 6))
+#'
+#' if (requireNamespace("MASS", quietly = TRUE)) {
+#'   ggplot2::ggplot(density_points, ggplot2::aes(x, y)) +
+#'     geom_density2d_webgl(bins = 3)
+#' }
+#' @export
+geom_density2d_webgl <- function(mapping = NULL,
+                                 data = NULL,
+                                 stat = "density_2d",
+                                 position = "identity",
+                                 ...,
+                                 contour_var = "density",
+                                 lineend = "butt",
+                                 linejoin = "round",
+                                 linemitre = 10,
+                                 na.rm = FALSE,
+                                 show.legend = NA,
+                                 inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomDensity2dWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      contour = TRUE,
+      contour_var = contour_var,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Contour Line Layer
+#'
+#' Add a line-contour layer tagged for the `ggWebGL` renderer. Contour
+#' generation is delegated to `ggplot2::StatContour`; this layer serializes the
+#' built contour paths as grouped WebGL line primitives. Filled contours are not
+#' rendered by this layer.
+#'
+#' @inheritParams ggplot2::geom_contour
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' grid <- expand.grid(x = seq(-1, 1, length.out = 5), y = seq(-1, 1, length.out = 5))
+#' grid$z <- with(grid, x^2 - y^2)
+#'
+#' ggplot2::ggplot(grid, ggplot2::aes(x, y, z = z)) +
+#'   geom_contour_webgl(bins = 4)
+#' @export
+geom_contour_webgl <- function(mapping = NULL,
+                               data = NULL,
+                               stat = "contour",
+                               position = "identity",
+                               ...,
+                               bins = NULL,
+                               binwidth = NULL,
+                               breaks = NULL,
+                               arrow = NULL,
+                               arrow.fill = NULL,
+                               lineend = "butt",
+                               linejoin = "round",
+                               linemitre = 10,
+                               na.rm = FALSE,
+                               show.legend = NA,
+                               inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomContourWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      bins = bins,
+      binwidth = binwidth,
+      breaks = breaks,
+      arrow = arrow,
+      arrow.fill = arrow.fill,
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
 #' WebGL Raster Layer
 #'
 #' Add a raster layer that is tagged for the `ggWebGL` rendering pipeline. The
@@ -176,6 +621,935 @@ geom_raster_webgl <- function(mapping = NULL,
   )
 }
 
+#' WebGL Rectangle Layer
+#'
+#' Add a rectangle layer tagged for the `ggWebGL` renderer. Boundaries are taken
+#' from the data built by `ggplot2`, so `xmin`, `xmax`, `ymin`, and `ymax`
+#' follow the same setup rules as [ggplot2::geom_rect()].
+#'
+#' @inheritParams ggplot2::geom_rect
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' rects <- data.frame(
+#'   xmin = c(0, 1.2),
+#'   xmax = c(0.8, 2),
+#'   ymin = c(0, 0.4),
+#'   ymax = c(1, 1.4),
+#'   group = c("a", "b")
+#' )
+#'
+#' ggplot2::ggplot(
+#'   rects,
+#'   ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = group)
+#' ) +
+#'   geom_rect_webgl(alpha = 0.7)
+#' @export
+geom_rect_webgl <- function(mapping = NULL,
+                            data = NULL,
+                            stat = "identity",
+                            position = "identity",
+                            ...,
+                            lineend = "butt",
+                            linejoin = "mitre",
+                            na.rm = FALSE,
+                            show.legend = NA,
+                            inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomRectWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Tile Layer
+#'
+#' Add a tile layer tagged for the `ggWebGL` renderer. Tile boundaries are read
+#' from `ggplot2`'s built layer data, which preserves `geom_tile()` width,
+#' height, and irregular-spacing behavior.
+#'
+#' @inheritParams ggplot2::geom_tile
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' tiles <- expand.grid(x = 1:3, y = 1:2)
+#' tiles$value <- with(tiles, x + y)
+#'
+#' ggplot2::ggplot(tiles, ggplot2::aes(x, y, fill = value)) +
+#'   geom_tile_webgl(alpha = 0.85)
+#' @export
+geom_tile_webgl <- function(mapping = NULL,
+                            data = NULL,
+                            stat = "identity",
+                            position = "identity",
+                            ...,
+                            lineend = "butt",
+                            linejoin = "mitre",
+                            na.rm = FALSE,
+                            show.legend = NA,
+                            inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomTileWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Bar Layer
+#'
+#' Add a bar layer tagged for the `ggWebGL` renderer. Counts and rectangle
+#' boundaries are produced by `ggplot2` through the selected stat and position.
+#'
+#' @inheritParams ggplot2::geom_bar
+#' @param stat Statistical transformation to use. Defaults to `"count"` so
+#'   `ggplot2` computes bar heights before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_count()` parameters such as `width`, plus static
+#'   aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' bar_data <- data.frame(group = c("a", "a", "b", "c", "c", "c"))
+#'
+#' ggplot2::ggplot(bar_data, ggplot2::aes(group)) +
+#'   geom_bar_webgl(fill = "#2563eb")
+#' @export
+geom_bar_webgl <- function(mapping = NULL,
+                           data = NULL,
+                           stat = "count",
+                           position = "stack",
+                           ...,
+                           just = 0.5,
+                           lineend = "butt",
+                           linejoin = "mitre",
+                           na.rm = FALSE,
+                           show.legend = NA,
+                           inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomBarWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      just = just,
+      lineend = lineend,
+      linejoin = linejoin,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Histogram Layer
+#'
+#' Add a histogram layer tagged for the `ggWebGL` renderer. Binning is delegated
+#' to `ggplot2::StatBin`; the WebGL layer consumes the built bar rectangles.
+#'
+#' @inheritParams ggplot2::geom_histogram
+#' @param stat Statistical transformation to use. Defaults to `"bin"` so
+#'   `ggplot2` computes histogram bins before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_bin()` parameters such as `breaks`, `boundary`,
+#'   `center`, `closed`, and `pad`, plus static aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' hist_data <- data.frame(x = c(0.1, 0.2, 0.7, 1.2, 1.6, 2.1))
+#'
+#' ggplot2::ggplot(hist_data, ggplot2::aes(x)) +
+#'   geom_histogram_webgl(binwidth = 0.5, fill = "#0f766e")
+#' @export
+geom_histogram_webgl <- function(mapping = NULL,
+                                 data = NULL,
+                                 stat = "bin",
+                                 position = "stack",
+                                 ...,
+                                 binwidth = NULL,
+                                 bins = NULL,
+                                 orientation = NA,
+                                 lineend = "butt",
+                                 linejoin = "mitre",
+                                 na.rm = FALSE,
+                                 show.legend = NA,
+                                 inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomBarWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      binwidth = binwidth,
+      bins = bins,
+      orientation = orientation,
+      lineend = lineend,
+      linejoin = linejoin,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL 2D Binned Rectangles
+#'
+#' Add a 2D binned layer tagged for the `ggWebGL` renderer. Binning is delegated
+#' to `ggplot2::StatBin2d`; the WebGL layer consumes the built rectangle
+#' boundaries and count/density metadata.
+#'
+#' @inheritParams ggplot2::geom_bin_2d
+#' @param stat Statistical transformation to use. Defaults to `"bin2d"` so
+#'   `ggplot2` computes two-dimensional bins before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_bin_2d()` parameters such as `bins`, `binwidth`,
+#'   `breaks`, and `drop`, plus static aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' bin_data <- data.frame(
+#'   x = c(0.1, 0.2, 0.7, 1.2, 1.8, 2.1),
+#'   y = c(0.1, 0.5, 0.6, 1.1, 1.3, 1.8)
+#' )
+#'
+#' ggplot2::ggplot(bin_data, ggplot2::aes(x, y)) +
+#'   geom_bin2d_webgl(binwidth = c(1, 1))
+#' @export
+geom_bin2d_webgl <- function(mapping = NULL,
+                             data = NULL,
+                             stat = "bin2d",
+                             position = "identity",
+                             ...,
+                             lineend = "butt",
+                             linejoin = "mitre",
+                             na.rm = FALSE,
+                             show.legend = NA,
+                             inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomBin2dWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      linejoin = linejoin,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Ribbon Layer
+#'
+#' Add a filled ribbon layer tagged for the `ggWebGL` renderer. The renderer
+#' consumes `ggplot2`-built `x`, `ymin`, and `ymax` values and draws each
+#' group/run as a filled triangle strip.
+#'
+#' @inheritParams ggplot2::geom_ribbon
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' ribbon_data <- data.frame(
+#'   x = 1:4,
+#'   ymin = c(0.1, 0.2, 0.1, 0.3),
+#'   ymax = c(0.4, 0.7, 0.5, 0.8)
+#' )
+#'
+#' ggplot2::ggplot(ribbon_data, ggplot2::aes(x, ymin = ymin, ymax = ymax)) +
+#'   geom_ribbon_webgl(fill = "#38bdf8", alpha = 0.6)
+#' @export
+geom_ribbon_webgl <- function(mapping = NULL,
+                              data = NULL,
+                              stat = "identity",
+                              position = "identity",
+                              ...,
+                              orientation = NA,
+                              lineend = "butt",
+                              linejoin = "round",
+                              linemitre = 10,
+                              outline.type = "both",
+                              na.rm = FALSE,
+                              show.legend = NA,
+                              inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomRibbonWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      orientation = orientation,
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      outline.type = outline.type,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Area Layer
+#'
+#' Add a filled area layer tagged for the `ggWebGL` renderer. Stacking and
+#' alignment are delegated to `ggplot2`; the WebGL layer consumes the built
+#' ribbon boundaries.
+#'
+#' @inheritParams ggplot2::geom_area
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' area_data <- data.frame(x = 1:4, y = c(1, 2, 1, 3))
+#'
+#' ggplot2::ggplot(area_data, ggplot2::aes(x, y)) +
+#'   geom_area_webgl(fill = "#0f766e", alpha = 0.7)
+#' @export
+geom_area_webgl <- function(mapping = NULL,
+                            data = NULL,
+                            stat = "align",
+                            position = "stack",
+                            ...,
+                            orientation = NA,
+                            outline.type = "upper",
+                            lineend = "butt",
+                            linejoin = "round",
+                            linemitre = 10,
+                            na.rm = FALSE,
+                            show.legend = NA,
+                            inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomAreaWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      orientation = orientation,
+      outline.type = outline.type,
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Simple Polygon Layer
+#'
+#' Add a simple polygon layer tagged for the `ggWebGL` renderer. The renderer
+#' triangulates each `ggplot2`-built group as one simple, non-self-intersecting
+#' ring and sends the result through the existing mesh primitive. Holes,
+#' multipolygons, and self-intersections are not supported.
+#'
+#' @inheritParams ggplot2::geom_polygon
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' polygon_data <- data.frame(
+#'   x = c(0, 1, 0.8, 0.2),
+#'   y = c(0, 0.1, 1, 0.8)
+#' )
+#'
+#' ggplot2::ggplot(polygon_data, ggplot2::aes(x, y)) +
+#'   geom_polygon_webgl(fill = "#38bdf8", alpha = 0.7)
+#' @export
+geom_polygon_webgl <- function(mapping = NULL,
+                               data = NULL,
+                               stat = "identity",
+                               position = "identity",
+                               ...,
+                               rule = "evenodd",
+                               lineend = "butt",
+                               linejoin = "round",
+                               linemitre = 10,
+                               na.rm = FALSE,
+                               show.legend = NA,
+                               inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomPolygonWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      rule = rule,
+      lineend = lineend,
+      linejoin = linejoin,
+      linemitre = linemitre,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Text Overlay Layer
+#'
+#' Add static text labels tagged for the `ggWebGL` renderer. Text is serialized
+#' as overlay metadata; it is not drawn as WebGL glyphs.
+#'
+#' @inheritParams ggplot2::geom_text
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' labels <- data.frame(x = c(1, 2), y = c(2, 1), label = c("left", "right"))
+#' ggplot2::ggplot(labels, ggplot2::aes(x, y, label = label)) +
+#'   geom_point_webgl() +
+#'   geom_text_webgl(vjust = -0.6)
+#' @export
+geom_text_webgl <- function(mapping = NULL,
+                            data = NULL,
+                            stat = "identity",
+                            position = "nudge",
+                            ...,
+                            parse = FALSE,
+                            check_overlap = FALSE,
+                            size.unit = "mm",
+                            na.rm = FALSE,
+                            show.legend = NA,
+                            inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomTextWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      parse = parse,
+      check_overlap = check_overlap,
+      size.unit = size.unit,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Label Overlay Layer
+#'
+#' Add label annotations tagged for the `ggWebGL` renderer. Labels are serialized
+#' as text overlay metadata with background-box styling metadata; they are not
+#' drawn as WebGL glyphs.
+#'
+#' @inheritParams ggplot2::geom_label
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' labels <- data.frame(x = c(1, 2), y = c(2, 1), label = c("A", "B"))
+#' ggplot2::ggplot(labels, ggplot2::aes(x, y, label = label)) +
+#'   geom_point_webgl() +
+#'   geom_label_webgl(fill = "#f8fafc", alpha = 0.9)
+#' @export
+geom_label_webgl <- function(mapping = NULL,
+                             data = NULL,
+                             stat = "identity",
+                             position = "nudge",
+                             ...,
+                             parse = FALSE,
+                             label.padding = grid::unit(0.25, "lines"),
+                             label.r = grid::unit(0.15, "lines"),
+                             border.colour = NULL,
+                             border.color = NULL,
+                             text.colour = NULL,
+                             text.color = NULL,
+                             size.unit = "mm",
+                             na.rm = FALSE,
+                             show.legend = NA,
+                             inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomLabelWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      parse = parse,
+      label.padding = label.padding,
+      label.r = label.r,
+      border.colour = border.color %||% border.colour,
+      text.colour = text.color %||% text.colour,
+      size.unit = size.unit,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Rug Layer
+#'
+#' Add rug marks tagged for the `ggWebGL` renderer. Rug marks are serialized as
+#' pure segment primitives with arrowheads disabled.
+#'
+#' @inheritParams ggplot2::geom_rug
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' rug_data <- data.frame(x = c(1, 2, 3), y = c(2, 1, 3))
+#' ggplot2::ggplot(rug_data, ggplot2::aes(x, y)) +
+#'   geom_point_webgl() +
+#'   geom_rug_webgl(sides = "bl")
+#' @export
+geom_rug_webgl <- function(mapping = NULL,
+                           data = NULL,
+                           stat = "identity",
+                           position = "identity",
+                           ...,
+                           lineend = "butt",
+                           sides = "bl",
+                           outside = FALSE,
+                           length = grid::unit(0.03, "npc"),
+                           na.rm = FALSE,
+                           show.legend = NA,
+                           inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomRugWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      lineend = lineend,
+      sides = sides,
+      outside = outside,
+      length = length,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Violin Layer
+#'
+#' Add a violin layer tagged for the `ggWebGL` renderer. Density estimation and
+#' scaling are computed by `ggplot2::stat_ydensity`; the renderer converts each
+#' built violin group to a mesh-backed filled strip. Quantile guide lines and
+#' exact stroke parity with `ggplot2::geom_violin()` are not implemented.
+#'
+#' @inheritParams ggplot2::geom_violin
+#' @param stat Statistical transformation to use. Defaults to `"ydensity"` so
+#'   `ggplot2` computes violin density and scaling before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_ydensity()` parameters such as `bw`, `adjust`,
+#'   `kernel`, `n`, and quantile-related arguments, plus static aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' violin_data <- data.frame(
+#'   group = rep(c("a", "b"), each = 24),
+#'   value = c(seq(-1, 1, length.out = 24), seq(-0.4, 1.6, length.out = 24))
+#' )
+#'
+#' ggplot2::ggplot(violin_data, ggplot2::aes(group, value, fill = group)) +
+#'   geom_violin_webgl(alpha = 0.65)
+#' @export
+geom_violin_webgl <- function(mapping = NULL,
+                              data = NULL,
+                              stat = "ydensity",
+                              position = "dodge",
+                              ...,
+                              trim = TRUE,
+                              bounds = c(-Inf, Inf),
+                              scale = "area",
+                              na.rm = FALSE,
+                              orientation = NA,
+                              show.legend = NA,
+                              inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomViolinWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      na.rm = na.rm,
+      orientation = orientation,
+      bounds = bounds,
+      ...
+    )
+  )
+}
+
+#' WebGL Segment Layer
+#'
+#' Add a pure line-segment layer tagged for the `ggWebGL` renderer. Segments use
+#' the vector primitive with arrowheads disabled; use [geom_vector_webgl()] when
+#' arrowheads are wanted.
+#'
+#' @inheritParams ggplot2::geom_segment
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' segments <- data.frame(
+#'   x = c(0, 1),
+#'   y = c(0, 0.2),
+#'   xend = c(0.8, 1.6),
+#'   yend = c(0.7, 1)
+#' )
+#' ggplot2::ggplot(segments, ggplot2::aes(x, y, xend = xend, yend = yend)) +
+#'   geom_segment_webgl(linewidth = 1.2)
+#' @export
+geom_segment_webgl <- function(mapping = NULL,
+                               data = NULL,
+                               stat = "identity",
+                               position = "identity",
+                               ...,
+                               na.rm = FALSE,
+                               show.legend = NA,
+                               inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomSegmentWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(head_size = 0, na.rm = na.rm, ...)
+  )
+}
+
+#' WebGL Linerange Layer
+#'
+#' Add a vertical range layer tagged for the `ggWebGL` renderer. The renderer
+#' consumes `ggplot2`-built `x`, `ymin`, and `ymax` values and serializes ranges
+#' as pure segment primitives.
+#'
+#' @inheritParams ggplot2::geom_linerange
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' ranges <- data.frame(x = 1:3, y = c(2, 3, 2.5), ymin = c(1, 2, 1.8), ymax = c(3, 4, 3.2))
+#' ggplot2::ggplot(ranges, ggplot2::aes(x, y, ymin = ymin, ymax = ymax)) +
+#'   geom_linerange_webgl(linewidth = 1)
+#' @export
+geom_linerange_webgl <- function(mapping = NULL,
+                                 data = NULL,
+                                 stat = "identity",
+                                 position = "identity",
+                                 ...,
+                                 orientation = NA,
+                                 lineend = "butt",
+                                 na.rm = FALSE,
+                                 show.legend = NA,
+                                 inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomLinerangeWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      orientation = orientation,
+      lineend = lineend,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Errorbar Layer
+#'
+#' Add a vertical error-bar layer tagged for the `ggWebGL` renderer. The
+#' renderer consumes `ggplot2`-built range and cap columns and serializes them
+#' as pure segment primitives.
+#'
+#' @inheritParams ggplot2::geom_errorbar
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' errors <- data.frame(x = 1:3, y = c(2, 3, 2.5), ymin = c(1, 2, 1.8), ymax = c(3, 4, 3.2))
+#' ggplot2::ggplot(errors, ggplot2::aes(x, y, ymin = ymin, ymax = ymax)) +
+#'   geom_errorbar_webgl(width = 0.2)
+#' @export
+geom_errorbar_webgl <- function(mapping = NULL,
+                                data = NULL,
+                                stat = "identity",
+                                position = "identity",
+                                ...,
+                                orientation = NA,
+                                lineend = "butt",
+                                na.rm = FALSE,
+                                show.legend = NA,
+                                inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomErrorbarWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      orientation = orientation,
+      lineend = lineend,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Pointrange Layer
+#'
+#' Add a point plus vertical range layer tagged for the `ggWebGL` renderer.
+#' Pointranges serialize to one point payload and one pure segment payload.
+#'
+#' @inheritParams ggplot2::geom_pointrange
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' ranges <- data.frame(x = 1:3, y = c(2, 3, 2.5), ymin = c(1, 2, 1.8), ymax = c(3, 4, 3.2))
+#' ggplot2::ggplot(ranges, ggplot2::aes(x, y, ymin = ymin, ymax = ymax)) +
+#'   geom_pointrange_webgl()
+#' @export
+geom_pointrange_webgl <- function(mapping = NULL,
+                                  data = NULL,
+                                  stat = "identity",
+                                  position = "identity",
+                                  ...,
+                                  orientation = NA,
+                                  lineend = "butt",
+                                  na.rm = FALSE,
+                                  show.legend = NA,
+                                  inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomPointrangeWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      orientation = orientation,
+      lineend = lineend,
+      na.rm = na.rm,
+      ...
+    )
+  )
+}
+
+#' WebGL Crossbar Layer
+#'
+#' Add a crossbar layer tagged for the `ggWebGL` renderer. Crossbars serialize
+#' to one filled rectangle payload for the body and one pure segment payload for
+#' the middle line.
+#'
+#' @inheritParams ggplot2::geom_crossbar
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' crossbars <- data.frame(x = 1:3, y = c(2, 3, 2.5), ymin = c(1, 2, 1.8), ymax = c(3, 4, 3.2))
+#' ggplot2::ggplot(crossbars, ggplot2::aes(x, y, ymin = ymin, ymax = ymax)) +
+#'   geom_crossbar_webgl(width = 0.35, fill = "#93c5fd")
+#' @export
+geom_crossbar_webgl <- function(mapping = NULL,
+                                data = NULL,
+                                stat = "identity",
+                                position = "identity",
+                                ...,
+                                middle.colour = NULL,
+                                middle.color = NULL,
+                                middle.linetype = NULL,
+                                middle.linewidth = NULL,
+                                box.colour = NULL,
+                                box.color = NULL,
+                                box.linetype = NULL,
+                                box.linewidth = NULL,
+                                na.rm = FALSE,
+                                orientation = NA,
+                                show.legend = NA,
+                                inherit.aes = TRUE) {
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomCrossbarWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      na.rm = na.rm,
+      orientation = orientation,
+      ...
+    )
+  )
+}
+
+#' WebGL Boxplot Layer
+#'
+#' Add a boxplot layer tagged for the `ggWebGL` renderer. Boxplot statistics are
+#' computed by `ggplot2`; the renderer serializes the built box body as
+#' rectangles, medians/whiskers as pure segments, and outliers as points.
+#'
+#' @inheritParams ggplot2::geom_boxplot
+#' @param stat Statistical transformation to use. Defaults to `"boxplot"` so
+#'   `ggplot2` computes boxplot summary statistics before WebGL serialization.
+#' @param ... Additional arguments forwarded through `ggplot2::layer()`,
+#'   including `ggplot2::stat_boxplot()` parameters such as `coef` and `width`,
+#'   plus static aesthetics.
+#'
+#' @return A `Layer` ready for `ggplot2`.
+#'
+#' @examples
+#' box_data <- data.frame(group = rep(c("a", "b"), each = 6), value = c(1:6, 2:7))
+#' ggplot2::ggplot(box_data, ggplot2::aes(group, value, fill = group)) +
+#'   geom_boxplot_webgl()
+#' @export
+geom_boxplot_webgl <- function(mapping = NULL,
+                               data = NULL,
+                               stat = "boxplot",
+                               position = "dodge2",
+                               ...,
+                               outliers = TRUE,
+                               outlier.colour = NULL,
+                               outlier.color = NULL,
+                               outlier.fill = NULL,
+                               outlier.shape = NULL,
+                               outlier.size = NULL,
+                               outlier.stroke = 0.5,
+                               outlier.alpha = NULL,
+                               whisker.colour = NULL,
+                               whisker.color = NULL,
+                               whisker.linetype = NULL,
+                               whisker.linewidth = NULL,
+                               staple.colour = NULL,
+                               staple.color = NULL,
+                               staple.linetype = NULL,
+                               staple.linewidth = NULL,
+                               median.colour = NULL,
+                               median.color = NULL,
+                               median.linetype = NULL,
+                               median.linewidth = NULL,
+                               box.colour = NULL,
+                               box.color = NULL,
+                               box.linetype = NULL,
+                               box.linewidth = NULL,
+                               notch = FALSE,
+                               notchwidth = 0.5,
+                               staplewidth = 0,
+                               varwidth = FALSE,
+                               na.rm = FALSE,
+                               orientation = NA,
+                               show.legend = NA,
+                               inherit.aes = TRUE) {
+  if (is.character(position) && isTRUE(varwidth)) {
+    position <- ggplot2::position_dodge2(preserve = "single")
+  }
+  outlier_gp <- list(
+    colour = outlier.color %||% outlier.colour,
+    fill = outlier.fill,
+    shape = outlier.shape,
+    size = outlier.size,
+    stroke = outlier.stroke,
+    alpha = outlier.alpha
+  )
+  whisker_gp <- list(
+    colour = whisker.color %||% whisker.colour,
+    linetype = whisker.linetype,
+    linewidth = whisker.linewidth
+  )
+  staple_gp <- list(
+    colour = staple.color %||% staple.colour,
+    linetype = staple.linetype,
+    linewidth = staple.linewidth
+  )
+  median_gp <- list(
+    colour = median.color %||% median.colour,
+    linetype = median.linetype,
+    linewidth = median.linewidth
+  )
+  box_gp <- list(
+    colour = box.color %||% box.colour,
+    linetype = box.linetype,
+    linewidth = box.linewidth
+  )
+
+  ggplot2::layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomBoxplotWebGL,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      outliers = outliers,
+      outlier_gp = outlier_gp,
+      whisker_gp = whisker_gp,
+      staple_gp = staple_gp,
+      median_gp = median_gp,
+      box_gp = box_gp,
+      notch = notch,
+      notchwidth = notchwidth,
+      staplewidth = staplewidth,
+      varwidth = varwidth,
+      na.rm = na.rm,
+      orientation = orientation,
+      ...
+    )
+  )
+}
+
 #' WebGL Vector Arrow Layer
 #'
 #' Add a 2D or 3D vector-arrow layer tagged for the `ggWebGL` renderer.
@@ -208,98 +1582,5 @@ geom_vector_webgl <- function(mapping = NULL,
     show.legend = show.legend,
     inherit.aes = inherit.aes,
     params = list(head_size = head_size, na.rm = na.rm, ...)
-  )
-}
-
-#' WebGL Mesh Layer
-#'
-#' Add a mesh layer tagged for the `ggWebGL` 3D renderer. Mesh
-#' triangles are supplied with `i`, `j`, and `k` aesthetics using one-based
-#' vertex indices.
-#'
-#' @inheritParams ggplot2::geom_point
-#' @param wireframe Whether to request a wireframe overlay.
-#' @param material Mesh material created by [ggwebgl_material()].
-#' @param normals Optional vertex normals or `"auto"`.
-#' @param pick_id Optional face picking ids.
-#'
-#' @return A `Layer` ready for `ggplot2`.
-#'
-#' @examples
-#' vertices <- data.frame(
-#'   x = c(0, 1, 0),
-#'   y = c(0, 0, 1),
-#'   z = c(0, 0, 0),
-#'   i = c(1, NA, NA),
-#'   j = c(2, NA, NA),
-#'   k = c(3, NA, NA)
-#' )
-#' ggplot2::ggplot(vertices, ggplot2::aes(x, y, z = z, i = i, j = j, k = k)) +
-#'   geom_mesh_webgl()
-#' @export
-geom_mesh_webgl <- function(mapping = NULL,
-                            data = NULL,
-                            stat = "identity",
-                            position = "identity",
-                            ...,
-                            wireframe = FALSE,
-                            material = ggwebgl_material(wireframe = wireframe),
-                            normals = NULL,
-                            pick_id = NULL,
-                            na.rm = FALSE,
-                            show.legend = NA,
-                            inherit.aes = TRUE) {
-  ggplot2::layer(
-    data = data,
-    mapping = mapping,
-    stat = stat,
-    geom = GeomMeshWebGL,
-    position = position,
-    show.legend = show.legend,
-    inherit.aes = inherit.aes,
-    params = list(wireframe = wireframe, material = material, normals = normals, pick_id = pick_id, na.rm = na.rm, ...)
-  )
-}
-
-#' WebGL Triangulated Surface Layer
-#'
-#' Add a regular-grid surface layer tagged for the `ggWebGL` mesh
-#' renderer. The built grid is triangulated before being sent to WebGL.
-#'
-#' @inheritParams ggplot2::geom_raster
-#' @param wireframe Whether to request a wireframe overlay.
-#' @param material Surface material created by [ggwebgl_material()].
-#' @param normals Normal-generation mode. `"auto"` computes vertex normals.
-#' @param pick_id Optional face picking ids.
-#'
-#' @return A `Layer` ready for `ggplot2`.
-#'
-#' @examples
-#' surface <- expand.grid(x = 1:3, y = 1:3)
-#' surface$z <- with(surface, sin(x) + cos(y))
-#' ggplot2::ggplot(surface, ggplot2::aes(x, y, z = z, fill = z)) +
-#'   geom_surface_webgl()
-#' @export
-geom_surface_webgl <- function(mapping = NULL,
-                               data = NULL,
-                               stat = "identity",
-                               position = "identity",
-                               ...,
-                               wireframe = FALSE,
-                               material = ggwebgl_material(shading = "lambert", wireframe = wireframe),
-                               normals = "auto",
-                               pick_id = NULL,
-                               na.rm = FALSE,
-                               show.legend = NA,
-                               inherit.aes = TRUE) {
-  ggplot2::layer(
-    data = data,
-    mapping = mapping,
-    stat = stat,
-    geom = GeomSurfaceWebGL,
-    position = position,
-    show.legend = show.legend,
-    inherit.aes = inherit.aes,
-    params = list(wireframe = wireframe, material = material, normals = normals, pick_id = pick_id, na.rm = na.rm, ...)
   )
 }
